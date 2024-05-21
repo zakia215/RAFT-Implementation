@@ -4,9 +4,9 @@ import "fmt"
 
 type Address struct {
 	IPAddress string
-	Port      int
+	Port      string
 }
 
 func (a *Address) PrintAddress() {
-	fmt.Printf("Address: %s:%d\n", a.IPAddress, a.Port)
+	fmt.Printf("Address: %s:%s\n", a.IPAddress, a.Port)
 }

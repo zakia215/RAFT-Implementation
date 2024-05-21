@@ -18,7 +18,7 @@ const (
 )
 
 type Node struct {
-	Adress        Address
+	Address       Address
 	Type          NodeType
 	ElectionTerm  int
 	AddressList   []Address
@@ -34,4 +34,6 @@ func (n *Node) SendHeartbeat() {
 	// TODO: send a heartbeat to followers
 }
 
-// etc
+func (n *Node) GetValue(key string) string {
+	return n.Application[key]
+}
