@@ -37,3 +37,7 @@ func (n *Node) SendHeartbeat() {
 func (n *Node) GetValue(key string) string {
 	return n.Application[key]
 }
+
+func (n *Node) SetValue(key string, value string) {
+	n.Application[key] = value
+}
