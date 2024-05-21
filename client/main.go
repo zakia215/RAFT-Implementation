@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"net/rpc"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -25,12 +27,30 @@ func main() {
 	}
 
 	// sending the request
-	var reply string
-	err = client.Call("RPCService.Ping", struct{}{}, &reply)
+	reader := bufio.NewReader(os.Stdin)
 
-	if err != nil {
-		log.Fatal("Call error:", err)
+repl:
+	for {
+		fmt.Print(">> ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		var reply string
+
+		switch input {
+		case "exit":
+			fmt.Println("Exiting...")
+			break repl
+		case "ping":
+			err = client.Call("RPCService.Ping", struct{}{}, &reply)
+		default:
+			fmt.Println("Invalid command")
+		}
+
+		if err != nil {
+			log.Fatal("Call error:", err)
+		}
+
+		fmt.Println(reply)
 	}
-
-	fmt.Println(reply)
 }
