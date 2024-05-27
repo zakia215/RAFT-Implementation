@@ -55,3 +55,9 @@ func (r *RPCService) Append(args []string, reply *string) error {
 	*reply = "OK"
 	return nil
 }
+
+func (r *RPCService) AddFollower(address Address, reply *string) error {
+	r.Node.AddFollower(address)
+	*reply = "Follower added: " + address.IPAddress + ":" + address.Port
+	return nil
+}
