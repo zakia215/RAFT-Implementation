@@ -10,9 +10,20 @@ type RPCService struct {
 	Node *Node
 }
 
+type RequestVoteArgs struct {
+	Term        int
+	CandidateID Address
+}
+
+type RequestVoteReply struct {
+	Term        int
+	VoteGranted bool
+}
+
 func (r *RPCService) Ping(_ struct{}, reply *string) error {
 	fmt.Println("PING")
 	*reply = "PONG"
+	r.Node.heartbeatCh <- true // Send signal to reset election timer
 	return nil
 }
 
@@ -59,5 +70,26 @@ func (r *RPCService) Append(args []string, reply *string) error {
 func (r *RPCService) AddFollower(address Address, reply *string) error {
 	r.Node.AddFollower(address)
 	*reply = "Follower added: " + address.IPAddress + ":" + address.Port
+	return nil
+}
+
+func (r *RPCService) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
+	r.Node.mutex.Lock()
+	defer r.Node.mutex.Unlock()
+
+	if args.Term < r.Node.ElectionTerm {
+		reply.Term = r.Node.ElectionTerm
+		reply.VoteGranted = false
+		return nil
+	}
+
+	if r.Node.VotedFor == nil || *r.Node.VotedFor == args.CandidateID {
+		r.Node.VotedFor = &args.CandidateID
+		reply.VoteGranted = true
+	} else {
+		reply.VoteGranted = false
+	}
+
+	reply.Term = r.Node.ElectionTerm
 	return nil
 }

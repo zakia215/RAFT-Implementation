@@ -43,6 +43,7 @@ func main() {
 		AddressList:   []Address{},
 		LeaderAddress: Address{IPAddress: leaderIP, Port: leaderPort},
 		Application:   map[string]string{},
+		heartbeatCh:   make(chan bool),
 	}
 
 	if isLeader {
@@ -60,7 +61,8 @@ func main() {
 			log.Fatal("Error adding follower to leader:", err)
 		}
 		fmt.Println(reply)
-	}	
+		go node.ResetElectionTimer()
+	}
 
 	// creating the rpc instance
 	rpcService := &RPCService{Node: node}
