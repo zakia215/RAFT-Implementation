@@ -172,7 +172,8 @@ func (n *Node) ResetElectionTimer() {
 				if !timer.Stop() {
 					<-timer.C
 				}
-				timer.Reset(electionTimeout) // Reset the countdown
+				electionTimeout = time.Duration(rand.Intn(int(ELECTION_TIMEOUT_MAX.Seconds()-ELECTION_TIMEOUT_MIN.Seconds()))+int(ELECTION_TIMEOUT_MIN.Seconds())) * time.Second
+				timer.Reset(electionTimeout)
 				remaining = electionTimeout
 			case <-timer.C:
 				remaining = 0
