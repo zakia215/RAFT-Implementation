@@ -1,6 +1,7 @@
 package main
 
 import (
+	"common"
 	"fmt"
 	"math/rand"
 	"net/rpc"
@@ -35,6 +36,9 @@ type Node struct {
 	Application   map[string]string
 	mutex         sync.Mutex
 	heartbeatCh   chan bool
+	Log           []common.LogEntry
+	CommitIndex   int
+	LastApplied   int
 }
 
 func (n *Node) InitializeLeader() {
