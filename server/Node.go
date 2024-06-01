@@ -1,413 +1,216 @@
 package main
 
 import (
-	"common"
-	"fmt"
+	"log"
 	"math/rand"
-	"net/rpc"
 	"sync"
 	"time"
 )
 
-// NodeType definitions
-type NodeType string
+type LogEntry struct {
+	Term    int
+	Command interface{}
+}
+
+type State int
 
 const (
-	LEADER    NodeType = "LEADER"
-	FOLLOWER  NodeType = "FOLLOWER"
-	CANDIDATE NodeType = "CANDIDATE"
-)
-
-// constants for timeout and interval
-const (
-	HEARTBEAT_INTERVAL   = 1 * time.Second
-	ELECTION_TIMEOUT_MIN = 5 * time.Second
-	ELECTION_TIMEOUT_MAX = 7 * time.Second
-	RPC_TIMEOUT          = 500 * time.Millisecond
+	Follower State = iota
+	Candidate
+	Leader
 )
 
 type Node struct {
-	Address       Address
-	Type          NodeType
-	ElectionTerm  int
-	VotedFor      *Address
-	AddressList   []Address
-	LeaderAddress Address
-	Application   map[string]string
-	mutex         sync.Mutex
-	heartbeatCh   chan bool
-	Log           []common.LogEntry
-	CommitIndex   int
-	LastApplied   int
+	mu             sync.Mutex
+	Id             string
+	State          State
+	CurrentTerm    int
+	VotedFor       *string
+	Log            []LogEntry
+	CommitIndex    int
+	LastApplied    int
+	NextIndex      map[string]int
+	MatchIndex     map[string]int
+	ElectionTimer  *time.Timer
+	HeartbeatTimer *time.Ticker
+	Peers          []string
+	VoteCount      int
+	Store          map[string]string
 }
 
-type RequestVoteArgs struct {
-	Term         int
-	CandidateID  Address
-	LastLogIndex int
-	LastLogTerm  int
+func (n *Node) Initialize() {
+	n.State = Follower
+	n.CurrentTerm = 0
+	n.VotedFor = nil
+	n.Log = []LogEntry{}
+	n.CommitIndex = 0
+	n.LastApplied = 0
+	n.NextIndex = make(map[string]int)
+	n.MatchIndex = make(map[string]int)
+	n.Store = make(map[string]string)
+	n.resetElectionTimer()
 }
 
-type RequestVoteReply struct {
-	Term        int
-	VoteGranted bool
+func (n *Node) resetElectionTimer() {
+	if n.State == Leader {
+		return // Do not reset election timer if node is the leader
+	}
+
+	if n.ElectionTimer != nil {
+		n.ElectionTimer.Stop()
+	}
+	timeout := randomElectionTimeout()
+	n.ElectionTimer = time.AfterFunc(timeout, func() {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		if n.State != Leader {
+			log.Printf("Election timeout reached, starting new election")
+			n.startElection()
+		}
+	})
+	log.Printf("Election timer reset to %v", timeout)
 }
 
-type AppendEntriesArgs struct {
-	Term         int
-	LeaderID     Address
-	PrevLogIndex int
-	PrevLogTerm  int
-	Entries      []common.LogEntry
-	LeaderCommit int
+func randomElectionTimeout() time.Duration {
+	return time.Duration(5+rand.Intn(5)) * time.Second // 5 to 10 seconds
 }
 
-type AppendEntriesReply struct {
-	Term    int
-	Success bool
+func (n *Node) startElection() {
+	n.State = Candidate
+	n.CurrentTerm++
+	n.VotedFor = &n.Id
+	n.VoteCount = 1
+	log.Printf("Starting election for term %d", n.CurrentTerm)
+	n.resetElectionTimer()
+	n.sendRequestVoteRPCs()
 }
 
-type AddressListReply struct {
-	AddressList []Address
+func (n *Node) sendRequestVoteRPCs() {
+	for _, peer := range n.Peers {
+		go n.sendRequestVote(peer)
+	}
 }
 
-func (n *Node) InitializeLeader() {
-	n.Type = LEADER
-	n.LeaderAddress = n.Address
-	go n.StartHeartbeat()
+func (n *Node) SendAppendEntriesRPCs() {
+	for _, peer := range n.Peers {
+		if peer == n.Id {
+			continue
+		}
+
+		log.Printf("Sending AppendEntries RPC to %s", peer)
+		go n.sendAppendEntries(peer)
+	}
 }
 
 func (n *Node) StartHeartbeat() {
-	ticker := time.NewTicker(HEARTBEAT_INTERVAL)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if n.Type != LEADER {
-			return
-		}
-		n.SendHeartbeat()
-	}
-}
-
-func (n *Node) SendHeartbeat() {
-	for _, address := range n.AddressList {
-		if address != n.Address {
-			go func(address Address) {
-				err := n.SendHeartbeatTo(address)
-				if err != nil {
-					fmt.Println("Heartbeat failed to", address.IPAddress+":"+address.Port, ":", err)
-					n.mutex.Lock()
-					if n.Type == LEADER {
-						n.RemoveNode(address)
-						fmt.Println("Leader heartbeat failed to", address.IPAddress+":"+address.Port, ". Removing node.")
-						n.NotifyFollowersOfNewAddressList()
-					}
-					n.mutex.Unlock()
-				}
-			}(address)
-		}
-	}
-}
-
-func (n *Node) SendHeartbeatTo(address Address) error {
-	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	var reply string
-	err = client.Call("RPCService.Ping", struct{}{}, &reply)
-	if err != nil {
-		return err
-	}
-	fmt.Println("Heartbeat sent to", address.IPAddress+":"+address.Port, ":", reply)
-	return nil
-}
-
-func (n *Node) GetValue(key string) string {
-	return n.Application[key]
-}
-
-func (n *Node) SetValue(key string, value string) {
-	n.Application[key] = value
-}
-
-func (n *Node) AddFollower(address Address) {
-	n.AddressList = append(n.AddressList, address)
-	fmt.Println("New follower added:", address.IPAddress+":"+address.Port)
-	n.NotifyFollowersOfNewAddressList()
-}
-
-func (n *Node) UpdateAddressList(addressList []Address) {
-	n.AddressList = addressList
-	fmt.Println("Address list updated:", n.AddressList)
-}
-
-func (n *Node) RemoveNode(address Address) {
-	for i, addr := range n.AddressList {
-		if addr == address {
-			n.AddressList = append(n.AddressList[:i], n.AddressList[i+1:]...)
-			fmt.Println("Removed node:", address.IPAddress+":"+address.Port)
-			break
-		}
-	}
-}
-
-func (n *Node) StartElection() {
-	n.mutex.Lock()
-	n.Type = CANDIDATE
-	n.ElectionTerm++
-	n.VotedFor = &n.Address
-	n.mutex.Unlock()
-
-	votes := 1
-	voteCh := make(chan bool, len(n.AddressList))
-	doneCh := make(chan struct{})
-
-	for _, address := range n.AddressList {
-		if address != n.Address {
-			go n.RequestVote(address, voteCh)
-		}
-	}
-
-	electionTimeout := time.Duration(rand.Intn(int(ELECTION_TIMEOUT_MAX.Seconds()-ELECTION_TIMEOUT_MIN.Seconds()))+int(ELECTION_TIMEOUT_MIN.Seconds())) * time.Second
-	timeout := time.After(electionTimeout)
-
+	n.HeartbeatTimer = time.NewTicker(1 * time.Second)
 	go func() {
-		for votes < len(n.AddressList)/2+1 {
-			select {
-			case voteGranted := <-voteCh:
-				if voteGranted {
-					votes++
-				}
-			case <-timeout:
-				fmt.Println("Election timeout. Starting new election.")
-				go n.StartElection()
-				close(doneCh)
-				return
-			}
+		for range n.HeartbeatTimer.C {
+			n.SendAppendEntriesRPCs()
 		}
-
-		if votes >= len(n.AddressList)/2+1 {
-			fmt.Println("Election won. Becoming leader with", votes, "vote(s).")
-			n.InitializeLeader()
-			n.NotifyFollowersOfNewLeader()
-		} else {
-			fmt.Println("Election lost. Received", votes, "vote(s).")
-			n.mutex.Lock()
-			n.Type = FOLLOWER
-			n.mutex.Unlock()
-		}
-		close(doneCh)
 	}()
-
-	<-doneCh
 }
 
-func (n *Node) RequestVote(address Address, voteCh chan bool) {
-	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
-	if err != nil {
-		fmt.Println("Error dialing:", err)
-		voteCh <- false
-		n.mutex.Lock()
-		n.RemoveNode(address)
-		n.mutex.Unlock()
-		n.NotifyFollowersOfNewAddressList()
-		return
-	}
-	defer client.Close()
-
+func (n *Node) sendRequestVote(peer string) {
 	lastLogIndex := len(n.Log) - 1
-	lastLogTerm := -1
-	if lastLogIndex >= 0 {
+	lastLogTerm := 0
+	if len(n.Log) > 0 {
 		lastLogTerm = n.Log[lastLogIndex].Term
 	}
 
 	args := RequestVoteArgs{
-		Term:         n.ElectionTerm,
-		CandidateID:  n.Address,
+		Term:         n.CurrentTerm,
+		CandidateId:  n.Id,
 		LastLogIndex: lastLogIndex,
 		LastLogTerm:  lastLogTerm,
 	}
 	var reply RequestVoteReply
-	err = client.Call("RPCService.RequestVote", args, &reply)
-	if err != nil {
-		fmt.Println("Error calling RequestVote:", err)
-		voteCh <- false
-		n.mutex.Lock()
-		n.RemoveNode(address)
-		n.mutex.Unlock()
-		n.NotifyFollowersOfNewAddressList()
-		return
+	if call(peer, "Node.RequestVote", args, &reply) {
+		n.handleRequestVoteReply(reply)
+	}
+}
+
+func (n *Node) sendAppendEntries(peer string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	prevLogIndex := n.NextIndex[peer] - 1
+	prevLogTerm := 0
+	if prevLogIndex >= 0 && prevLogIndex < len(n.Log) {
+		prevLogTerm = n.Log[prevLogIndex].Term
 	}
 
-	if reply.Term > n.ElectionTerm {
-		n.mutex.Lock()
-		n.ElectionTerm = reply.Term
-		n.Type = FOLLOWER
+	args := AppendEntriesArgs{
+		Term:         n.CurrentTerm,
+		LeaderId:     n.Id,
+		PrevLogIndex: prevLogIndex,
+		PrevLogTerm:  prevLogTerm,
+		Entries:      n.Log[n.NextIndex[peer]:],
+		LeaderCommit: n.CommitIndex,
+	}
+	var reply AppendEntriesReply
+	if call(peer, "Node.AppendEntries", args, &reply) {
+		n.handleAppendEntriesReply(peer, reply)
+	}
+}
+
+func (n *Node) handleRequestVoteReply(reply RequestVoteReply) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if reply.Term > n.CurrentTerm {
+		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", reply.Term, n.CurrentTerm, reply.Term)
+		n.CurrentTerm = reply.Term
 		n.VotedFor = nil
-		n.mutex.Unlock()
-		voteCh <- false
+		n.State = Follower
+		n.resetElectionTimer()
 		return
 	}
 
-	voteCh <- reply.VoteGranted
-}
+	if n.State != Candidate {
+		return
+	}
 
-func (n *Node) ResetElectionTimer() {
-	for {
-		electionTimeout := time.Duration(rand.Intn(int(ELECTION_TIMEOUT_MAX.Seconds()-ELECTION_TIMEOUT_MIN.Seconds()))+int(ELECTION_TIMEOUT_MIN.Seconds())) * time.Second
-		timer := time.NewTimer(electionTimeout)
-
-		for remaining := electionTimeout; remaining > 0; remaining -= time.Second {
-			fmt.Printf("Node %s: Election timeout in %d seconds\n", n.Address.IPAddress+":"+n.Address.Port, remaining/time.Second)
-			select {
-			case <-time.After(time.Second):
-				// Continue countdown
-			case <-n.heartbeatCh:
-				fmt.Println("Heartbeat received, resetting election timer.")
-				if !timer.Stop() {
-					<-timer.C
-				}
-				electionTimeout = time.Duration(rand.Intn(int(ELECTION_TIMEOUT_MAX.Seconds()-ELECTION_TIMEOUT_MIN.Seconds()))+int(ELECTION_TIMEOUT_MIN.Seconds())) * time.Second
-				timer.Reset(electionTimeout)
-				remaining = electionTimeout
-			case <-timer.C:
-				remaining = 0
-			}
-		}
-
-		if n.Type == FOLLOWER {
-			fmt.Println("Election timeout. Starting election.")
-			go n.StartElection()
-			return
+	if reply.VoteGranted {
+		n.VoteCount++
+		log.Printf("Received vote, total votes: %d", n.VoteCount)
+		if n.VoteCount > len(n.Peers)/2 {
+			log.Printf("Won election for term %d with %d votes", n.CurrentTerm, n.VoteCount)
+			n.State = Leader
+			n.initializeLeaderState()
+			n.StartHeartbeat() // Start sending heartbeats as a leader
 		}
 	}
 }
 
-func (n *Node) sendAppendEntries(address Address) {
-	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
-	if err != nil {
-		fmt.Println("Error dialing:", err)
-		n.mutex.Lock()
-		n.RemoveNode(address)
-		n.mutex.Unlock()
-		n.NotifyFollowersOfNewAddressList()
-		return
-	}
-	defer client.Close()
-
-	args := AppendEntriesArgs{
-		Term:         n.ElectionTerm,
-		LeaderID:     n.Address,
-		PrevLogIndex: len(n.Log) - 1,
-		PrevLogTerm:  -1,
-		Entries:      []common.LogEntry{},
-		LeaderCommit: n.CommitIndex,
-	}
-
-	if len(n.Log) > 0 {
-		args.PrevLogTerm = n.Log[len(n.Log)-1].Term
-		args.Entries = append(args.Entries, n.Log[len(n.Log)-1])
-	}
-
-	var reply AppendEntriesReply
-	err = client.Call("RPCService.AppendEntries", args, &reply)
-	if err != nil {
-		fmt.Println("Error calling AppendEntries to", address.IPAddress+":"+address.Port, ":", err)
-		return
-	}
-
-	if !reply.Success && reply.Term > n.ElectionTerm {
-		n.mutex.Lock()
-		n.ElectionTerm = reply.Term
-		n.Type = FOLLOWER
-		fmt.Printf("Node %s: New term %d established, now following node %s\n", n.Address, n.ElectionTerm, args.LeaderID)
-		n.mutex.Unlock()
+func (n *Node) initializeLeaderState() {
+	n.NextIndex = make(map[string]int)
+	n.MatchIndex = make(map[string]int)
+	for _, peer := range n.Peers {
+		n.NextIndex[peer] = len(n.Log)
+		n.MatchIndex[peer] = 0
 	}
 }
 
-func (n *Node) replicateLog() {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
-	for _, address := range n.AddressList {
-		if address != n.Address {
-			go n.sendAppendEntries(address)
-		}
-	}
-}
-
-func (n *Node) NotifyFollowersOfNewLeader() {
-	for _, address := range n.AddressList {
-		if address != n.Address {
-			go n.SendNewLeaderNotification(address)
-		}
-	}
-}
-
-func (n *Node) SendNewLeaderNotification(address Address) {
-	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
-	if err != nil {
-		fmt.Println("Error dialing:", err)
-		n.mutex.Lock()
-		n.RemoveNode(address)
-		n.mutex.Unlock()
-		n.NotifyFollowersOfNewAddressList()
+func (n *Node) handleAppendEntriesReply(peer string, reply AppendEntriesReply) {
+	if reply.Term > n.CurrentTerm {
+		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", reply.Term, n.CurrentTerm, reply.Term)
+		n.CurrentTerm = reply.Term
+		n.VotedFor = nil
+		n.State = Follower
+		n.resetElectionTimer()
 		return
 	}
-	defer client.Close()
 
-	args := AppendEntriesArgs{
-		Term:         n.ElectionTerm,
-		LeaderID:     n.Address,
-		PrevLogIndex: -1, // No log entries
-		PrevLogTerm:  -1,
-		Entries:      nil,
-		LeaderCommit: n.CommitIndex,
+	if n.State != Leader {
+		return
 	}
 
-	var reply AppendEntriesReply
-	err = client.Call("RPCService.AppendEntries", args, &reply)
-	if err != nil {
-		fmt.Println("Error calling AppendEntries to", address.IPAddress+":"+address.Port, ":", err)
-		return
+	if reply.Success {
+		log.Printf("AppendEntries successful for %s", peer)
+		n.MatchIndex[peer] = n.NextIndex[peer]
+		n.NextIndex[peer] = len(n.Log)
 	} else {
-		fmt.Println("New leader notification sent to", address.IPAddress+":"+address.Port)
+		n.NextIndex[peer]--
 	}
-
-	if !reply.Success && reply.Term > n.ElectionTerm {
-		n.mutex.Lock()
-		n.ElectionTerm = reply.Term
-		n.Type = FOLLOWER
-		fmt.Printf("Node %s: New term %d established, now following node %s\n", n.Address, n.ElectionTerm, args.LeaderID)
-		n.mutex.Unlock()
-	}
-}
-
-func (n *Node) NotifyFollowersOfNewAddressList() {
-	for _, address := range n.AddressList {
-		if address != n.Address {
-			go n.SendUpdatedAddressList(address)
-		}
-	}
-}
-
-func (n *Node) SendUpdatedAddressList(address Address) {
-	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
-	if err != nil {
-		fmt.Println("Error dialing:", err)
-		return
-	}
-	defer client.Close()
-
-	args := n.AddressList
-	var reply string
-	err = client.Call("RPCService.UpdateAddressList", args, &reply)
-	if err != nil {
-		fmt.Println("Error calling UpdateAddressList to", address.IPAddress+":"+address.Port, ":", err)
-		return
-	}
-	fmt.Println("Updated address list sent to", address.IPAddress+":"+address.Port)
 }
