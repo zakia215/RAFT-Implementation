@@ -4,7 +4,7 @@ import (
 	"common"
 	"errors"
 	"fmt"
-	"net/rpc"
+	// "net/rpc"
 	"strconv"
 )
 
@@ -74,52 +74,11 @@ func (r *RPCService) Set(args []string, reply *string) error {
 	return nil
 }
 
-func (n *Node) replicateLog() {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
-	for _, address := range n.AddressList {
-		if address != n.Address {
-			go n.sendAppendEntries(address)
-		}
-	}
-}
-
 func (r *RPCService) GetLog(_ struct{}, reply *[]common.LogEntry) error {
 	r.Node.mutex.Lock()
 	defer r.Node.mutex.Unlock()
 	*reply = r.Node.Log
 	return nil
-}
-
-func (n *Node) sendAppendEntries(address Address) {
-	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
-	if err != nil {
-		fmt.Println("Error dialing:", err)
-		return
-	}
-	defer client.Close()
-
-	args := AppendEntriesArgs{
-		Term:         n.ElectionTerm,
-		LeaderID:     n.Address,
-		PrevLogIndex: len(n.Log) - 1,
-		PrevLogTerm:  n.Log[len(n.Log)-1].Term,
-		Entries:      []common.LogEntry{n.Log[len(n.Log)-1]},
-		LeaderCommit: n.CommitIndex,
-	}
-
-	var reply AppendEntriesReply
-	err = client.Call("RPCService.AppendEntries", args, &reply)
-	if err != nil {
-		fmt.Println("Error calling AppendEntries to", address.IPAddress+":"+address.Port, ":", err)
-		return
-	}
-
-	if !reply.Success && reply.Term > n.ElectionTerm {
-		n.ElectionTerm = reply.Term
-		n.Type = FOLLOWER
-	}
 }
 
 func (r *RPCService) Strln(key string, reply *string) error {
