@@ -22,20 +22,6 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
-type AppendEntriesArgs struct {
-	Term         int
-	LeaderID     Address
-	PrevLogIndex int
-	PrevLogTerm  int
-	Entries      []common.LogEntry
-	LeaderCommit int
-}
-
-type AppendEntriesReply struct {
-	Term    int
-	Success bool
-}
-
 func (r *RPCService) Ping(_ struct{}, reply *string) error {
 	fmt.Println("CYKA")
 	*reply = "BLYAT"

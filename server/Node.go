@@ -41,6 +41,20 @@ type Node struct {
 	LastApplied   int
 }
 
+type AppendEntriesArgs struct {
+	Term         int
+	LeaderID     Address
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []common.LogEntry
+	LeaderCommit int
+}
+
+type AppendEntriesReply struct {
+	Term    int
+	Success bool
+}
+
 func (n *Node) InitializeLeader() {
 	n.Type = LEADER
 	n.ElectionTerm++
