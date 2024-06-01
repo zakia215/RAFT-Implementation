@@ -22,7 +22,7 @@ const (
 const (
 	HEARTBEAT_INTERVAL   = 1 * time.Second
 	ELECTION_TIMEOUT_MIN = 5 * time.Second
-	ELECTION_TIMEOUT_MAX = 10 * time.Second
+	ELECTION_TIMEOUT_MAX = 7 * time.Second
 	RPC_TIMEOUT          = 500 * time.Millisecond
 )
 
@@ -41,6 +41,18 @@ type Node struct {
 	LastApplied   int
 }
 
+type RequestVoteArgs struct {
+	Term         int
+	CandidateID  Address
+	LastLogIndex int
+	LastLogTerm  int
+}
+
+type RequestVoteReply struct {
+	Term        int
+	VoteGranted bool
+}
+
 type AppendEntriesArgs struct {
 	Term         int
 	LeaderID     Address
@@ -55,9 +67,12 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
+type AddressListReply struct {
+	AddressList []Address
+}
+
 func (n *Node) InitializeLeader() {
 	n.Type = LEADER
-	n.ElectionTerm++
 	n.LeaderAddress = n.Address
 	go n.StartHeartbeat()
 }
@@ -83,9 +98,9 @@ func (n *Node) SendHeartbeat() {
 					fmt.Println("Heartbeat failed to", address.IPAddress+":"+address.Port, ":", err)
 					n.mutex.Lock()
 					if n.Type == LEADER {
-						fmt.Println("Leader heartbeat failed. Starting election.")
-						n.Type = FOLLOWER
-						go n.StartElection()
+						n.RemoveNode(address)
+						fmt.Println("Leader heartbeat failed to", address.IPAddress+":"+address.Port, ". Removing node.")
+						n.NotifyFollowersOfNewAddressList()
 					}
 					n.mutex.Unlock()
 				}
@@ -121,18 +136,34 @@ func (n *Node) SetValue(key string, value string) {
 func (n *Node) AddFollower(address Address) {
 	n.AddressList = append(n.AddressList, address)
 	fmt.Println("New follower added:", address.IPAddress+":"+address.Port)
+	n.NotifyFollowersOfNewAddressList()
+}
+
+func (n *Node) UpdateAddressList(addressList []Address) {
+	n.AddressList = addressList
+	fmt.Println("Address list updated:", n.AddressList)
+}
+
+func (n *Node) RemoveNode(address Address) {
+	for i, addr := range n.AddressList {
+		if addr == address {
+			n.AddressList = append(n.AddressList[:i], n.AddressList[i+1:]...)
+			fmt.Println("Removed node:", address.IPAddress+":"+address.Port)
+			break
+		}
+	}
 }
 
 func (n *Node) StartElection() {
 	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
 	n.Type = CANDIDATE
 	n.ElectionTerm++
 	n.VotedFor = &n.Address
+	n.mutex.Unlock()
 
 	votes := 1
 	voteCh := make(chan bool, len(n.AddressList))
+	doneCh := make(chan struct{})
 
 	for _, address := range n.AddressList {
 		if address != n.Address {
@@ -143,23 +174,35 @@ func (n *Node) StartElection() {
 	electionTimeout := time.Duration(rand.Intn(int(ELECTION_TIMEOUT_MAX.Seconds()-ELECTION_TIMEOUT_MIN.Seconds()))+int(ELECTION_TIMEOUT_MIN.Seconds())) * time.Second
 	timeout := time.After(electionTimeout)
 
-	for votes < len(n.AddressList)/2+1 {
-		select {
-		case voteGranted := <-voteCh:
-			if voteGranted {
-				votes++
+	go func() {
+		for votes < len(n.AddressList)/2+1 {
+			select {
+			case voteGranted := <-voteCh:
+				if voteGranted {
+					votes++
+				}
+			case <-timeout:
+				fmt.Println("Election timeout. Starting new election.")
+				go n.StartElection()
+				close(doneCh)
+				return
 			}
-		case <-timeout:
-			fmt.Println("Election timeout. Starting new election.")
-			go n.StartElection()
-			return
 		}
-	}
 
-	if votes >= len(n.AddressList)/2+1 {
-		fmt.Println("Election won. Becoming leader.")
-		n.InitializeLeader()
-	}
+		if votes >= len(n.AddressList)/2+1 {
+			fmt.Println("Election won. Becoming leader with", votes, "vote(s).")
+			n.InitializeLeader()
+			n.NotifyFollowersOfNewLeader()
+		} else {
+			fmt.Println("Election lost. Received", votes, "vote(s).")
+			n.mutex.Lock()
+			n.Type = FOLLOWER
+			n.mutex.Unlock()
+		}
+		close(doneCh)
+	}()
+
+	<-doneCh
 }
 
 func (n *Node) RequestVote(address Address, voteCh chan bool) {
@@ -167,18 +210,44 @@ func (n *Node) RequestVote(address Address, voteCh chan bool) {
 	if err != nil {
 		fmt.Println("Error dialing:", err)
 		voteCh <- false
+		n.mutex.Lock()
+		n.RemoveNode(address)
+		n.mutex.Unlock()
+		n.NotifyFollowersOfNewAddressList()
 		return
 	}
 	defer client.Close()
 
+	lastLogIndex := len(n.Log) - 1
+	lastLogTerm := -1
+	if lastLogIndex >= 0 {
+		lastLogTerm = n.Log[lastLogIndex].Term
+	}
+
 	args := RequestVoteArgs{
-		Term:        n.ElectionTerm,
-		CandidateID: n.Address,
+		Term:         n.ElectionTerm,
+		CandidateID:  n.Address,
+		LastLogIndex: lastLogIndex,
+		LastLogTerm:  lastLogTerm,
 	}
 	var reply RequestVoteReply
 	err = client.Call("RPCService.RequestVote", args, &reply)
 	if err != nil {
 		fmt.Println("Error calling RequestVote:", err)
+		voteCh <- false
+		n.mutex.Lock()
+		n.RemoveNode(address)
+		n.mutex.Unlock()
+		n.NotifyFollowersOfNewAddressList()
+		return
+	}
+
+	if reply.Term > n.ElectionTerm {
+		n.mutex.Lock()
+		n.ElectionTerm = reply.Term
+		n.Type = FOLLOWER
+		n.VotedFor = nil
+		n.mutex.Unlock()
 		voteCh <- false
 		return
 	}
@@ -212,6 +281,7 @@ func (n *Node) ResetElectionTimer() {
 		if n.Type == FOLLOWER {
 			fmt.Println("Election timeout. Starting election.")
 			go n.StartElection()
+			return
 		}
 	}
 }
@@ -220,6 +290,10 @@ func (n *Node) sendAppendEntries(address Address) {
 	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
 	if err != nil {
 		fmt.Println("Error dialing:", err)
+		n.mutex.Lock()
+		n.RemoveNode(address)
+		n.mutex.Unlock()
+		n.NotifyFollowersOfNewAddressList()
 		return
 	}
 	defer client.Close()
@@ -228,9 +302,14 @@ func (n *Node) sendAppendEntries(address Address) {
 		Term:         n.ElectionTerm,
 		LeaderID:     n.Address,
 		PrevLogIndex: len(n.Log) - 1,
-		PrevLogTerm:  n.Log[len(n.Log)-1].Term,
-		Entries:      []common.LogEntry{n.Log[len(n.Log)-1]},
+		PrevLogTerm:  -1,
+		Entries:      []common.LogEntry{},
 		LeaderCommit: n.CommitIndex,
+	}
+
+	if len(n.Log) > 0 {
+		args.PrevLogTerm = n.Log[len(n.Log)-1].Term
+		args.Entries = append(args.Entries, n.Log[len(n.Log)-1])
 	}
 
 	var reply AppendEntriesReply
@@ -241,8 +320,11 @@ func (n *Node) sendAppendEntries(address Address) {
 	}
 
 	if !reply.Success && reply.Term > n.ElectionTerm {
+		n.mutex.Lock()
 		n.ElectionTerm = reply.Term
 		n.Type = FOLLOWER
+		fmt.Printf("Node %s: New term %d established, now following node %s\n", n.Address, n.ElectionTerm, args.LeaderID)
+		n.mutex.Unlock()
 	}
 }
 
@@ -255,4 +337,77 @@ func (n *Node) replicateLog() {
 			go n.sendAppendEntries(address)
 		}
 	}
+}
+
+func (n *Node) NotifyFollowersOfNewLeader() {
+	for _, address := range n.AddressList {
+		if address != n.Address {
+			go n.SendNewLeaderNotification(address)
+		}
+	}
+}
+
+func (n *Node) SendNewLeaderNotification(address Address) {
+	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
+	if err != nil {
+		fmt.Println("Error dialing:", err)
+		n.mutex.Lock()
+		n.RemoveNode(address)
+		n.mutex.Unlock()
+		n.NotifyFollowersOfNewAddressList()
+		return
+	}
+	defer client.Close()
+
+	args := AppendEntriesArgs{
+		Term:         n.ElectionTerm,
+		LeaderID:     n.Address,
+		PrevLogIndex: -1, // No log entries
+		PrevLogTerm:  -1,
+		Entries:      nil,
+		LeaderCommit: n.CommitIndex,
+	}
+
+	var reply AppendEntriesReply
+	err = client.Call("RPCService.AppendEntries", args, &reply)
+	if err != nil {
+		fmt.Println("Error calling AppendEntries to", address.IPAddress+":"+address.Port, ":", err)
+		return
+	} else {
+		fmt.Println("New leader notification sent to", address.IPAddress+":"+address.Port)
+	}
+
+	if !reply.Success && reply.Term > n.ElectionTerm {
+		n.mutex.Lock()
+		n.ElectionTerm = reply.Term
+		n.Type = FOLLOWER
+		fmt.Printf("Node %s: New term %d established, now following node %s\n", n.Address, n.ElectionTerm, args.LeaderID)
+		n.mutex.Unlock()
+	}
+}
+
+func (n *Node) NotifyFollowersOfNewAddressList() {
+	for _, address := range n.AddressList {
+		if address != n.Address {
+			go n.SendUpdatedAddressList(address)
+		}
+	}
+}
+
+func (n *Node) SendUpdatedAddressList(address Address) {
+	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
+	if err != nil {
+		fmt.Println("Error dialing:", err)
+		return
+	}
+	defer client.Close()
+
+	args := n.AddressList
+	var reply string
+	err = client.Call("RPCService.UpdateAddressList", args, &reply)
+	if err != nil {
+		fmt.Println("Error calling UpdateAddressList to", address.IPAddress+":"+address.Port, ":", err)
+		return
+	}
+	fmt.Println("Updated address list sent to", address.IPAddress+":"+address.Port)
 }

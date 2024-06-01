@@ -40,7 +40,9 @@ func main() {
 		Address:       Address{IPAddress: ip, Port: port},
 		Type:          nodeType,
 		ElectionTerm:  0,
-		AddressList:   []Address{},
+		AddressList:   []Address{
+			{IPAddress: ip, Port: port},
+		},
 		LeaderAddress: Address{IPAddress: leaderIP, Port: leaderPort},
 		Application:   map[string]string{},
 		heartbeatCh:   make(chan bool),
@@ -55,12 +57,13 @@ func main() {
 		}
 		defer client.Close()
 
-		var reply string
+		var reply AddressListReply
 		err = client.Call("RPCService.AddFollower", Address{IPAddress: ip, Port: port}, &reply)
 		if err != nil {
 			log.Fatal("Error adding follower to leader:", err)
 		}
-		fmt.Println(reply)
+		node.AddressList = reply.AddressList
+		fmt.Println("Follower received address list:", node.AddressList)
 		go node.ResetElectionTimer()
 	}
 

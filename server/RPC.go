@@ -4,7 +4,6 @@ import (
 	"common"
 	"errors"
 	"fmt"
-	// "net/rpc"
 	"strconv"
 )
 
@@ -12,19 +11,9 @@ type RPCService struct {
 	Node *Node
 }
 
-type RequestVoteArgs struct {
-	Term        int
-	CandidateID Address
-}
-
-type RequestVoteReply struct {
-	Term        int
-	VoteGranted bool
-}
-
 func (r *RPCService) Ping(_ struct{}, reply *string) error {
-	fmt.Println("CYKA")
-	*reply = "BLYAT"
+	fmt.Println("PING")
+	*reply = "PONG"
 	r.Node.heartbeatCh <- true
 	return nil
 }
@@ -111,7 +100,7 @@ func (r *RPCService) Append(args []string, reply *string) error {
 	return nil
 }
 
-func (r *RPCService) AddFollower(address Address, reply *string) error {
+func (r *RPCService) AddFollower(address Address, reply *AddressListReply) error {
 	r.Node.mutex.Lock()
 	defer r.Node.mutex.Unlock()
 	command := fmt.Sprintf("ADDFOLLOWER %s:%s", address.IPAddress, address.Port)
@@ -122,7 +111,8 @@ func (r *RPCService) AddFollower(address Address, reply *string) error {
 	r.Node.Log = append(r.Node.Log, logEntry)
 
 	r.Node.AddFollower(address)
-	*reply = "Follower added: " + address.IPAddress + ":" + address.Port
+	reply.AddressList = r.Node.AddressList
+	r.Node.NotifyFollowersOfNewAddressList()
 	return nil
 }
 
@@ -136,7 +126,19 @@ func (r *RPCService) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) 
 		return nil
 	}
 
-	if r.Node.VotedFor == nil || *r.Node.VotedFor == args.CandidateID {
+	if args.Term > r.Node.ElectionTerm {
+		r.Node.ElectionTerm = args.Term
+		r.Node.VotedFor = nil
+	}
+
+	lastLogIndex := len(r.Node.Log) - 1
+	lastLogTerm := -1
+	if lastLogIndex >= 0 {
+		lastLogTerm = r.Node.Log[lastLogIndex].Term
+	}
+
+	if (r.Node.VotedFor == nil || *r.Node.VotedFor == args.CandidateID) &&
+		(args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)) {
 		r.Node.VotedFor = &args.CandidateID
 		reply.VoteGranted = true
 	} else {
@@ -159,8 +161,10 @@ func (r *RPCService) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesR
 
 	r.Node.ElectionTerm = args.Term
 	r.Node.LeaderAddress = args.LeaderID
+	r.Node.Type = FOLLOWER
+	r.Node.heartbeatCh <- true // Reset the election timer
 
-	if len(r.Node.Log) > args.PrevLogIndex && r.Node.Log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	if len(r.Node.Log) > args.PrevLogIndex && args.PrevLogIndex >= 0 && r.Node.Log[args.PrevLogIndex].Term != args.PrevLogTerm {
 		reply.Term = r.Node.ElectionTerm
 		reply.Success = false
 		return nil
@@ -173,6 +177,15 @@ func (r *RPCService) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesR
 
 	reply.Term = r.Node.ElectionTerm
 	reply.Success = true
+	fmt.Printf("Node %s: New term %d established, now following node %s\n", r.Node.Address, r.Node.ElectionTerm, args.LeaderID)
+	return nil
+}
+
+func (r *RPCService) UpdateAddressList(addressList []Address, reply *string) error {
+	r.Node.mutex.Lock()
+	defer r.Node.mutex.Unlock()
+	r.Node.UpdateAddressList(addressList)
+	*reply = "Address list updated"
 	return nil
 }
 
