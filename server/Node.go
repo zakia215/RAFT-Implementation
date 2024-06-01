@@ -79,7 +79,7 @@ func (n *Node) startElection() {
 	n.State = Candidate
 	n.CurrentTerm++
 	n.VotedFor = &n.Id
-	n.VoteCount = 1
+	n.VoteCount = 0 // Vote for self is done on request vote RPC
 	log.Printf("Starting election for term %d", n.CurrentTerm)
 	n.resetElectionTimer()
 	n.sendRequestVoteRPCs()
