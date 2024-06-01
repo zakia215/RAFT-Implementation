@@ -37,8 +37,8 @@ type AppendEntriesReply struct {
 }
 
 func (r *RPCService) Ping(_ struct{}, reply *string) error {
-	fmt.Println("PING")
-	*reply = "PONG"
+	fmt.Println("CYKA")
+	*reply = "BLYAT"
 	r.Node.heartbeatCh <- true
 	return nil
 }

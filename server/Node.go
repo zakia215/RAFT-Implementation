@@ -63,26 +63,37 @@ func (n *Node) StartHeartbeat() {
 func (n *Node) SendHeartbeat() {
 	for _, address := range n.AddressList {
 		if address != n.Address {
-			go n.SendHeartbeatTo(address)
+			go func(address Address) {
+				err := n.SendHeartbeatTo(address)
+				if err != nil {
+					fmt.Println("Heartbeat failed to", address.IPAddress+":"+address.Port, ":", err)
+					n.mutex.Lock()
+					if n.Type == LEADER {
+						fmt.Println("Leader heartbeat failed. Starting election.")
+						n.Type = FOLLOWER
+						go n.StartElection()
+					}
+					n.mutex.Unlock()
+				}
+			}(address)
 		}
 	}
 }
 
-func (n *Node) SendHeartbeatTo(address Address) {
+func (n *Node) SendHeartbeatTo(address Address) error {
 	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
 	if err != nil {
-		fmt.Println("Error dialing:", err)
-		return
+		return err
 	}
 	defer client.Close()
 
 	var reply string
 	err = client.Call("RPCService.Ping", struct{}{}, &reply)
 	if err != nil {
-		fmt.Println("Error calling Ping to", address.IPAddress+":"+address.Port, ":", err)
-		return
+		return err
 	}
 	fmt.Println("Heartbeat sent to", address.IPAddress+":"+address.Port, ":", reply)
+	return nil
 }
 
 func (n *Node) GetValue(key string) string {
