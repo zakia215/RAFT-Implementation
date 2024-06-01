@@ -1,6 +1,6 @@
 package common
 
 type LogEntry struct {
-	Term    int
-	Command string
+	Term    int    `json:"term"`
+	Command string `json:"command"`
 }
