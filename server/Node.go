@@ -12,6 +12,12 @@ type LogEntry struct {
 	Command interface{}
 }
 
+type CommitEntry struct {
+	Term    int
+	Index   int
+	Command interface{}
+}
+
 type State int
 
 const (
@@ -21,21 +27,23 @@ const (
 )
 
 type Node struct {
-	mu             sync.Mutex
-	Id             string
-	State          State
-	CurrentTerm    int
-	VotedFor       *string
-	Log            []LogEntry
-	CommitIndex    int
-	LastApplied    int
-	NextIndex      map[string]int
-	MatchIndex     map[string]int
-	ElectionTimer  *time.Timer
-	HeartbeatTimer *time.Ticker
-	Peers          []string
-	VoteCount      int
-	Store          map[string]string
+	mu                 sync.Mutex
+	Id                 string
+	State              State
+	CurrentTerm        int
+	VotedFor           *string
+	Log                []LogEntry
+	CommitIndex        int
+	LastApplied        int
+	NextIndex          map[string]int
+	MatchIndex         map[string]int
+	ElectionTimer      *time.Timer
+	HeartbeatTimer     *time.Ticker
+	Peers              []string
+	VoteCount          int
+	Store              map[string]string
+	CommitChan         chan<- CommitEntry
+	newCommitReadyChan chan struct{}
 }
 
 func (n *Node) Initialize() {
@@ -49,6 +57,7 @@ func (n *Node) Initialize() {
 	n.MatchIndex = make(map[string]int)
 	n.Store = make(map[string]string)
 	n.resetElectionTimer()
+	go n.commitChanSender()
 }
 
 func (n *Node) resetElectionTimer() {
@@ -132,7 +141,6 @@ func (n *Node) sendRequestVote(peer string) {
 
 func (n *Node) sendAppendEntries(peer string) {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 
 	prevLogIndex := n.NextIndex[peer] - 1
 	prevLogTerm := 0
@@ -148,6 +156,8 @@ func (n *Node) sendAppendEntries(peer string) {
 		Entries:      n.Log[n.NextIndex[peer]:],
 		LeaderCommit: n.CommitIndex,
 	}
+	defer n.mu.Unlock()
+	n.dlog("sending AppendEntries to %v: ni=%d, args=%+v", peer, n.NextIndex[peer], args)
 	var reply AppendEntriesReply
 	if call(peer, "Node.AppendEntries", args, &reply) {
 		n.handleAppendEntriesReply(peer, reply)
@@ -157,6 +167,7 @@ func (n *Node) sendAppendEntries(peer string) {
 func (n *Node) handleRequestVoteReply(reply RequestVoteReply) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	n.dlog("received RequestVoteReply %+v", reply)
 
 	if reply.Term > n.CurrentTerm {
 		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", reply.Term, n.CurrentTerm, reply.Term)
@@ -168,6 +179,7 @@ func (n *Node) handleRequestVoteReply(reply RequestVoteReply) {
 	}
 
 	if n.State != Candidate {
+		n.dlog("while waiting for reply, state = %v", n.State)
 		return
 	}
 
@@ -193,6 +205,8 @@ func (n *Node) initializeLeaderState() {
 }
 
 func (n *Node) handleAppendEntriesReply(peer string, reply AppendEntriesReply) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if reply.Term > n.CurrentTerm {
 		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", reply.Term, n.CurrentTerm, reply.Term)
 		n.CurrentTerm = reply.Term
@@ -210,7 +224,50 @@ func (n *Node) handleAppendEntriesReply(peer string, reply AppendEntriesReply) {
 		log.Printf("AppendEntries successful for %s", peer)
 		n.MatchIndex[peer] = n.NextIndex[peer]
 		n.NextIndex[peer] = len(n.Log)
+
+		savedCommitIndex := n.CommitIndex
+		for i := n.CommitIndex + 1; i < len(n.Log); i++ {
+			if n.Log[i].Term == n.CurrentTerm {
+				matchCount := 1
+				for _, peer := range n.Peers {
+					if n.MatchIndex[peer] >= i {
+						matchCount++
+					}
+				}
+				if matchCount*2 > len(n.Peers)+1 {
+					n.CommitIndex = i
+				}
+			}
+		}
+		if n.CommitIndex != savedCommitIndex {
+			n.dlog("leader sets commitIndex := %d", n.CommitIndex)
+			n.newCommitReadyChan <- struct{}{}
+		}
 	} else {
 		n.NextIndex[peer]--
+		log.Printf("AppendEntries not successful for %s", peer)
 	}
+}
+
+func (n *Node) commitChanSender() {
+	for range n.newCommitReadyChan {
+		n.mu.Lock()
+		savedTerm := n.CurrentTerm
+		savedLastApplied := n.LastApplied
+		var entries []LogEntry
+		if n.CommitIndex > n.LastApplied {
+			entries = n.Log[n.LastApplied+1 : n.CommitIndex+1]
+			n.LastApplied = n.CommitIndex
+		}
+		n.mu.Unlock()
+		n.dlog("commitChanSender entries=%v, savedLastApplied=%d", entries, savedLastApplied)
+		for i, entry := range entries {
+			n.CommitChan <- CommitEntry{
+				Command: entry.Command,
+				Index:   savedLastApplied + i + 1,
+				Term:    savedTerm,
+			}
+		}
+	}
+	n.dlog("commitChanSender done")
 }

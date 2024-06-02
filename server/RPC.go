@@ -82,13 +82,15 @@ func (n *Node) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error 
 	} else {
 		reply.VoteGranted = false
 	}
+	reply.Term = n.CurrentTerm
+	n.dlog("... RequestVote reply: %+v", reply)
 	return nil
 }
 
 func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-
+	n.dlog("AppendEntries: %+v", args)
 	if args.Term > n.CurrentTerm {
 		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", args.Term, n.CurrentTerm, args.Term)
 		n.CurrentTerm = args.Term
@@ -111,20 +113,43 @@ func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) 
 	}
 
 	// Append new entries
-	for i, entry := range args.Entries {
-		if len(n.Log) <= args.PrevLogIndex+1+i {
-			n.Log = append(n.Log, entry)
-		} else if n.Log[args.PrevLogIndex+1+i].Term != entry.Term {
-			n.Log = n.Log[:args.PrevLogIndex+1+i]
-			n.Log = append(n.Log, entry)
+	// for i, entry := range args.Entries {
+	// 	if len(n.Log) <= args.PrevLogIndex+1+i {
+	// 		n.Log = append(n.Log, entry)
+	// 	} else if n.Log[args.PrevLogIndex+1+i].Term != entry.Term {
+	// 		n.Log = n.Log[:args.PrevLogIndex+1+i]
+	// 		n.Log = append(n.Log, entry)
+	// 	}
+	// }
+	logInsertIndex := args.PrevLogIndex + 1
+	newEntriesIndex := 0
+
+	for {
+		if logInsertIndex >= len(n.Log) || newEntriesIndex >= len(args.Entries) {
+			break
 		}
+		if n.Log[logInsertIndex].Term != args.Entries[newEntriesIndex].Term {
+			break
+		}
+		logInsertIndex++
+		newEntriesIndex++
+	}
+
+	if newEntriesIndex < len(args.Entries) {
+		n.dlog("... inserting entries %v from index %d", args.Entries[newEntriesIndex:], logInsertIndex)
+		n.Log = append(n.Log[:logInsertIndex], args.Entries[newEntriesIndex:]...)
+		n.dlog("... log is now: %v", n.Log)
 	}
 
 	if args.LeaderCommit > n.CommitIndex {
 		n.CommitIndex = min(args.LeaderCommit, len(n.Log)-1)
+		n.dlog("... setting commitIndex=%d", n.CommitIndex)
+		n.newCommitReadyChan <- struct{}{}
 	}
 
 	reply.Success = true
+	reply.Term = n.CurrentTerm
+	n.dlog("AppendEntries reply: %+v", *reply)
 	log.Println("AppendEntries successful, resetting election timeout")
 	n.resetElectionTimer()
 	return nil
@@ -134,7 +159,7 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 	log.Printf("Received command %s", args.Command)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-
+	n.dlog("Submit received by %v: %v", n.State, args.Command)
 	if n.State != Leader {
 		reply.Response = "NOT LEADER"
 		return nil
@@ -144,12 +169,16 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 	case "ping":
 		reply.Response = "PONG"
 	case "get":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
 		if value, ok := n.Store[args.Key]; ok {
 			reply.Response = value
 		} else {
 			reply.Response = ""
 		}
 	case "set":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
 		n.Store[args.Key] = args.Value
 		reply.Response = "OK"
 	case "strln":
@@ -159,6 +188,8 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 			reply.Response = "0"
 		}
 	case "del":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
 		if value, ok := n.Store[args.Key]; ok {
 			delete(n.Store, args.Key)
 			reply.Response = value
@@ -166,6 +197,8 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 			reply.Response = ""
 		}
 	case "append":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
 		n.Store[args.Key] += args.Value
 		reply.Response = "OK"
 	default:
@@ -251,4 +284,9 @@ func call(peer string, rpcName string, args interface{}, reply interface{}) bool
 		return false
 	}
 	return true
+}
+
+func (n *Node) dlog(format string, args ...interface{}) {
+	format = fmt.Sprintf("[%s] ", n.Id) + format
+	log.Printf(format, args...)
 }
