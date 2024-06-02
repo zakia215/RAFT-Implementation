@@ -55,6 +55,8 @@ func (n *Node) Initialize() {
 	n.LastApplied = 0
 	n.NextIndex = make(map[string]int)
 	n.MatchIndex = make(map[string]int)
+	n.CommitChan = make(chan<- CommitEntry)
+	n.newCommitReadyChan = make(chan struct{})
 	n.Store = make(map[string]string)
 	n.resetElectionTimer()
 	go n.commitChanSender()

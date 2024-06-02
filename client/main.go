@@ -7,6 +7,7 @@ import (
 	"net/rpc"
 	"os"
 	"strings"
+
 	"github.com/fatih/color"
 )
 
@@ -112,7 +113,7 @@ repl:
 			continue
 		}
 
-		if (args.Command == "log") {
+		if args.Command == "log" {
 			continue
 		}
 

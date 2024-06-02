@@ -157,8 +157,6 @@ func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) 
 
 func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 	log.Printf("Received command %s", args.Command)
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	n.dlog("Submit received by %v: %v", n.State, args.Command)
 	if n.State != Leader {
 		reply.Response = "NOT LEADER"
