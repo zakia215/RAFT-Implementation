@@ -131,6 +131,7 @@ func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) 
 }
 
 func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
+	log.Printf("Received command %s", args.Command)
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -170,6 +171,16 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 	default:
 		reply.Response = "UNKNOWN COMMAND"
 	}
+	return nil
+}
+
+func (n *Node) GetLog(args struct{}, reply *[]LogEntry) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	fmt.Println("GetLog called")
+
+	*reply = n.Log
 	return nil
 }
 
