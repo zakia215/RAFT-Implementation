@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"net/rpc"
 	"os"
 )
 
 func main() {
-	// parsing arguments
 	if len(os.Args) < 3 {
-		fmt.Println("ERROR: Invalid arguments")
 		fmt.Println("USAGE: go run ./server/ <ip_address> <port> [leader_ip_address] [leader_port]")
 		return
 	}
@@ -23,75 +22,69 @@ func main() {
 	var leaderPort string
 	isLeader := len(os.Args) < 5
 
-	if !isLeader {
+	if (!isLeader) {
 		leaderIP = os.Args[3]
 		leaderPort = os.Args[4]
 	}
 
-	// creating the node instance
-	var nodeType NodeType
-	if isLeader {
-		nodeType = LEADER
-	} else {
-		nodeType = FOLLOWER
-	}
+	address := ip + ":" + port
+	nodeID := ip + ":" + port // Use the combination of IP and port as ID
 
-	node := &Node{
-		Address:       Address{IPAddress: ip, Port: port},
-		Type:          nodeType,
-		ElectionTerm:  0,
-		AddressList:   []Address{
-			{IPAddress: ip, Port: port},
-		},
-		LeaderAddress: Address{IPAddress: leaderIP, Port: leaderPort},
-		Application:   map[string]string{},
-		heartbeatCh:   make(chan bool),
+	// Create and initialize the node
+	node := Node{
+		Id:    nodeID,
+		Peers: []string{},
+		Store: make(map[string]string),
 	}
+	node.Initialize()
 
+	// Register the node as an RPC server
+	err := rpc.Register(&node)
+	if err != nil {
+		log.Fatalf("Failed to register RPC: %v", err)
+	}
+	rpc.HandleHTTP()
+
+	// Listen for incoming connections
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Fatalf("Failed to listen on %s: %v", address, err)
+	}
+	defer listener.Close()
+
+	log.Printf("Node listening on %s", address)
+
+	// If this node is the leader, start sending heartbeats
 	if isLeader {
-		node.InitializeLeader()
+		log.Println("This node is the leader")
+		node.State = Leader
+		node.Peers = append(node.Peers, nodeID) // Leader adds itself to its peer list
+		node.StartHeartbeat()
 	} else {
-		client, err := rpc.Dial("tcp", leaderIP+":"+leaderPort)
+		log.Println("This node is a follower")
+
+		client, err := rpc.DialHTTP("tcp", leaderIP+":"+leaderPort)
 		if err != nil {
-			log.Fatal("Error dialing leader:", err)
+			log.Fatalf("Failed to connect to leader: %v", err)
 		}
 		defer client.Close()
 
-		var reply AddressListReply
-		err = client.Call("RPCService.AddFollower", Address{IPAddress: ip, Port: port}, &reply)
+		// Send a JoinRPC to the leader
+		args := JoinArgs{Id: nodeID}
+		var reply JoinReply
+
+		err = client.Call("Node.Join", args, &reply)
 		if err != nil {
-			log.Fatal("Error adding follower to leader:", err)
+			log.Fatalf("JoinRPC failed: %v", err)
 		}
-		node.AddressList = reply.AddressList
-		fmt.Println("Follower received address list:", node.AddressList)
-		go node.ResetElectionTimer()
+
+		// Get the updated list of peers
+		node.mu.Lock()
+		node.Peers = reply.Peers
+		node.mu.Unlock()
+		log.Printf("Updated peer list: %v", node.Peers)
 	}
 
-	// creating the rpc instance
-	rpcService := &RPCService{Node: node}
-	rpc.Register(rpcService)
-
-	l, err := net.Listen("tcp", ip+":"+port)
-	if err != nil {
-		log.Fatal("Listen error:", err)
-	}
-
-	go func() {
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				log.Fatal("Accept error:", err)
-			}
-			go rpc.ServeConn(conn)
-		}
-	}()
-
-	// Print if leader
-	if isLeader {
-		fmt.Println("This node is a leader")
-	} else {
-		fmt.Println("This node is a follower")
-	}
-	fmt.Println("Server listening on " + ip + ":" + port)
-	select {}
+	// Start serving RPC requests
+	http.Serve(listener, nil)
 }
