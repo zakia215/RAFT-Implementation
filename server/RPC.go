@@ -144,13 +144,16 @@ func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) 
 	if args.LeaderCommit > n.CommitIndex {
 		n.CommitIndex = min(args.LeaderCommit, len(n.Log)-1)
 		n.dlog("... setting commitIndex=%d", n.CommitIndex)
-		n.newCommitReadyChan <- struct{}{}
+		n.applyLogEntry()
 	}
 
 	reply.Success = true
 	reply.Term = n.CurrentTerm
+	log.Println("Current log: ", n.Log, "last applied: ", n.LastApplied, "commit index", n.CommitIndex)
 	n.dlog("AppendEntries reply: %+v", *reply)
 	log.Println("AppendEntries successful, resetting election timeout")
+	log.Println("Address peer in cluster: ", n.Peers)
+	log.Println("======END OF APPEND ENTRIES=====\n")
 	n.resetElectionTimer()
 	return nil
 }
@@ -167,7 +170,7 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 	case "ping":
 		reply.Response = "PONG"
 	case "get":
-		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
 		n.dlog("... log=%v", n.Log)
 		if value, ok := n.Store[args.Key]; ok {
 			reply.Response = value
@@ -175,18 +178,19 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 			reply.Response = ""
 		}
 	case "set":
-		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
 		n.dlog("... log=%v", n.Log)
 		n.Store[args.Key] = args.Value
 		reply.Response = "OK"
 	case "strln":
+		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
 		if value, ok := n.Store[args.Key]; ok {
 			reply.Response = fmt.Sprintf("%d", len(value))
 		} else {
 			reply.Response = "0"
 		}
 	case "del":
-		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
 		n.dlog("... log=%v", n.Log)
 		if value, ok := n.Store[args.Key]; ok {
 			delete(n.Store, args.Key)
@@ -195,13 +199,14 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 			reply.Response = ""
 		}
 	case "append":
-		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
 		n.dlog("... log=%v", n.Log)
 		n.Store[args.Key] += args.Value
 		reply.Response = "OK"
 	default:
 		reply.Response = "UNKNOWN COMMAND"
 	}
+	log.Println("Current log: ", n.Log)
 	return nil
 }
 

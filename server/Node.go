@@ -9,7 +9,7 @@ import (
 
 type LogEntry struct {
 	Term    int
-	Command interface{}
+	Command ExecuteArgs
 }
 
 type CommitEntry struct {
@@ -59,7 +59,7 @@ func (n *Node) Initialize() {
 	n.newCommitReadyChan = make(chan struct{})
 	n.Store = make(map[string]string)
 	n.resetElectionTimer()
-	go n.commitChanSender()
+	// go n.commitChanSender()
 }
 
 func (n *Node) resetElectionTimer() {
@@ -111,12 +111,17 @@ func (n *Node) SendAppendEntriesRPCs() {
 		log.Printf("Sending AppendEntries RPC to %s", peer)
 		go n.sendAppendEntries(peer)
 	}
+	log.Println("=====END OF SENDING APPEND ENTRIES=====\n")
 }
 
 func (n *Node) StartHeartbeat() {
 	n.HeartbeatTimer = time.NewTicker(1 * time.Second)
 	go func() {
 		for range n.HeartbeatTimer.C {
+			if n.State == Follower {
+				return
+			}
+			log.Println("Current log: ", n.Log, "last applied: ", n.LastApplied, "commit index", n.CommitIndex)
 			n.SendAppendEntriesRPCs()
 		}
 	}()
@@ -158,7 +163,7 @@ func (n *Node) sendAppendEntries(peer string) {
 		Entries:      n.Log[n.NextIndex[peer]:],
 		LeaderCommit: n.CommitIndex,
 	}
-	defer n.mu.Unlock()
+	n.mu.Unlock()
 	n.dlog("sending AppendEntries to %v: ni=%d, args=%+v", peer, n.NextIndex[peer], args)
 	var reply AppendEntriesReply
 	if call(peer, "Node.AppendEntries", args, &reply) {
@@ -224,31 +229,41 @@ func (n *Node) handleAppendEntriesReply(peer string, reply AppendEntriesReply) {
 
 	if reply.Success {
 		log.Printf("AppendEntries successful for %s", peer)
-		n.MatchIndex[peer] = n.NextIndex[peer]
 		n.NextIndex[peer] = len(n.Log)
+		n.MatchIndex[peer] = n.NextIndex[peer] - 1
 
-		savedCommitIndex := n.CommitIndex
-		for i := n.CommitIndex + 1; i < len(n.Log); i++ {
-			if n.Log[i].Term == n.CurrentTerm {
-				matchCount := 1
-				for _, peer := range n.Peers {
-					if n.MatchIndex[peer] >= i {
-						matchCount++
-					}
-				}
-				if matchCount*2 > len(n.Peers)+1 {
-					n.CommitIndex = i
+		// count the majority of matching indexes
+		if n.countMajority(n.CommitIndex + 1) {
+			// get the highest log index to be commited and applied from the consensus
+			for _, peer := range n.Peers {
+				if n.MatchIndex[peer] > n.CommitIndex && n.countMajority(n.CommitIndex+1) {
+					n.CommitIndex = n.MatchIndex[peer]
 				}
 			}
+
+			// Apply log entries to the state machine
+			n.applyLogEntry()
 		}
-		if n.CommitIndex != savedCommitIndex {
-			n.dlog("leader sets commitIndex := %d", n.CommitIndex)
-			n.newCommitReadyChan <- struct{}{}
-		}
+
+		// if n.CommitIndex != savedCommitIndex {
+		// 	n.dlog("leader sets commitIndex := %d", n.CommitIndex)
+		// 	n.newCommitReadyChan <- struct{}{}
+		// }
 	} else {
 		n.NextIndex[peer]--
 		log.Printf("AppendEntries not successful for %s", peer)
 	}
+}
+
+func (n *Node) countMajority(threshold int) bool {
+	count := 1 // 1 is from the leader
+	for _, peer := range n.Peers {
+		if n.MatchIndex[peer] >= threshold {
+			count = count + 1
+		}
+	}
+	majorityThreshold := len(n.Peers)/2 + 1
+	return count >= majorityThreshold
 }
 
 func (n *Node) commitChanSender() {
@@ -272,4 +287,21 @@ func (n *Node) commitChanSender() {
 		}
 	}
 	n.dlog("commitChanSender done")
+}
+
+func (n *Node) applyLogEntry() {
+	// log.Printf("Last applied %d, commit index %d", n.LastApplied, n.CommitIndex)
+	for n.LastApplied < n.CommitIndex {
+		command := n.Log[n.LastApplied+1].Command
+		log.Printf("Applying log to store with command:  %s", command)
+		switch command.Key {
+		case "set":
+			n.Store[command.Key] = command.Value
+		case "del":
+			delete(n.Store, command.Key)
+		case "append":
+			n.Store[command.Key] += command.Value
+		}
+		n.LastApplied = n.LastApplied + 1
+	}
 }

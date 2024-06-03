@@ -23,7 +23,7 @@ type ExecuteReply struct {
 
 type LogEntry struct {
 	Term    int
-	Command interface{}
+	Command string
 }
 
 func main() {

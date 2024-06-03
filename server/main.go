@@ -22,7 +22,7 @@ func main() {
 	var leaderPort string
 	isLeader := len(os.Args) < 5
 
-	if (!isLeader) {
+	if !isLeader {
 		leaderIP = os.Args[3]
 		leaderPort = os.Args[4]
 	}
@@ -50,7 +50,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to listen on %s: %v", address, err)
 	}
-	defer listener.Close()
+	// defer listener.Close()
 
 	log.Printf("Node listening on %s", address)
 
