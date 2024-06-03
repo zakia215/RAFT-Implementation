@@ -43,7 +43,7 @@ func (s *Server) ConnectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := rpc.Dial("tcp", req.IP+":"+req.Port)
+	client, err := rpc.DialHTTP("tcp", req.IP+":"+req.Port)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Dial error: %v", err), http.StatusInternalServerError)
 		return
@@ -59,14 +59,18 @@ func (s *Server) PingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply := new(string)
-	err := s.client.Call("RPCService.Ping", struct{}{}, reply)
+	args := common.ExecuteArgs {
+		Command: "ping",
+	}
+
+	reply := common.ExecuteReply {}
+	err := s.client.Call("Node.Execute", args, &reply)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("RPC call error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"reply": *reply})
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply.Response})
 }
 
 func (s *Server) GetKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -81,14 +85,20 @@ func (s *Server) GetKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply := new(string)
-	err := s.client.Call("RPCService.Get", req.Key, reply)
+	args := common.ExecuteArgs {
+		Command: "get",
+		Key: req.Key,
+	}
+	
+	reply := common.ExecuteReply {}
+
+	err := s.client.Call("Node.Execute", args, &reply)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("RPC call error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"reply": *reply})
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply.Response})
 }
 
 func (s *Server) SetKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -103,16 +113,21 @@ func (s *Server) SetKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	args := []string{req.Key, req.Value}
+	args := common.ExecuteArgs {
+		Command: "set",
+		Key: req.Key,
+		Value: req.Value,
+	}
+	
+	reply := common.ExecuteReply {}
 
-	reply := new(string)
-	err := s.client.Call("RPCService.Set", args, reply)
+	err := s.client.Call("Node.Execute", args, &reply)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("RPC call error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"reply": *reply})
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply.Response})
 }
 
 func (s *Server) StrlnHandler(w http.ResponseWriter, r *http.Request) {
@@ -127,14 +142,20 @@ func (s *Server) StrlnHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply := new(string)
-	err := s.client.Call("RPCService.Strln", req.Key, reply)
+	args := common.ExecuteArgs {
+		Command: "strln",
+		Key: req.Key,
+	}
+	
+	reply := common.ExecuteReply {}
+
+	err := s.client.Call("Node.Execute", args, &reply)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("RPC call error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"reply": *reply})
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply.Response})
 }
 
 func (s *Server) DelKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -149,14 +170,20 @@ func (s *Server) DelKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply := new(string)
-	err := s.client.Call("RPCService.Del", req.Key, reply)
+	args := common.ExecuteArgs {
+		Command: "del",
+		Key: req.Key,
+	}
+	
+	reply := common.ExecuteReply {}
+
+	err := s.client.Call("Node.Execute", args, &reply)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("RPC call error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"reply": *reply})
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply.Response})
 }
 
 func (s *Server) AppendHandler(w http.ResponseWriter, r *http.Request) {
@@ -171,16 +198,21 @@ func (s *Server) AppendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	args := []string{req.Key, req.Value}
+	args := common.ExecuteArgs {
+		Command: "append",
+		Key: req.Key,
+		Value: req.Value,
+	}
+	
+	reply := common.ExecuteReply {}
 
-	reply := new(string)
-	err := s.client.Call("RPCService.Append", args, reply)
+	err := s.client.Call("Node.Execute", args, &reply)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("RPC call error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"reply": *reply})
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply.Response})
 }
 
 func (s *Server) LogHandler(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +222,7 @@ func (s *Server) LogHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logEntries := new([]common.LogEntry)
-	err := s.client.Call("RPCService.GetLog", struct{}{}, logEntries)
+	err := s.client.Call("Node.GetLog", struct{}{}, &logEntries)
 
 	if err != nil {
 		http.Error(w, fmt.Sprintf("RPC call error: %v", err), http.StatusInternalServerError)
