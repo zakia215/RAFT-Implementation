@@ -171,19 +171,38 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 		reply.Response = "PONG"
 	case "get":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
+		idxToExec := len(n.Log) - 1
 		n.dlog("... log=%v", n.Log)
-		if value, ok := n.Store[args.Key]; ok {
-			reply.Response = value
-		} else {
-			reply.Response = ""
+		isExec := false
+
+		for !isExec {
+			if n.LastApplied >= idxToExec {
+				if value, ok := n.Store[args.Key]; ok {
+					reply.Response = value
+				} else {
+					reply.Response = ""
+				}
+				isExec = true
+			}
 		}
 	case "set":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
+		idxToExec := len(n.Log) - 1
 		n.dlog("... log=%v", n.Log)
-		n.Store[args.Key] = args.Value
-		reply.Response = "OK"
+		isExec := false
+
+		for !isExec {
+			if n.LastApplied >= idxToExec {
+				reply.Response = "OK"
+				isExec = true
+			}
+		}
+
 	case "strln":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
+		// idxToExec := len(n.Log) - 1
+		n.dlog("... log=%v", n.Log)
+
 		if value, ok := n.Store[args.Key]; ok {
 			reply.Response = fmt.Sprintf("%d", len(value))
 		} else {
@@ -191,7 +210,9 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 		}
 	case "del":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
+		// idxToExec := len(n.Log) - 1
 		n.dlog("... log=%v", n.Log)
+
 		if value, ok := n.Store[args.Key]; ok {
 			delete(n.Store, args.Key)
 			reply.Response = value
@@ -200,7 +221,9 @@ func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
 		}
 	case "append":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
+		// idxToExec := len(n.Log) - 1
 		n.dlog("... log=%v", n.Log)
+
 		n.Store[args.Key] += args.Value
 		reply.Response = "OK"
 	default:

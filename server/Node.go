@@ -51,8 +51,8 @@ func (n *Node) Initialize() {
 	n.CurrentTerm = 0
 	n.VotedFor = nil
 	n.Log = []LogEntry{}
-	n.CommitIndex = 0
-	n.LastApplied = 0
+	n.CommitIndex = -1
+	n.LastApplied = -1
 	n.NextIndex = make(map[string]int)
 	n.MatchIndex = make(map[string]int)
 	n.CommitChan = make(chan<- CommitEntry)
@@ -103,14 +103,20 @@ func (n *Node) sendRequestVoteRPCs() {
 }
 
 func (n *Node) SendAppendEntriesRPCs() {
-	for _, peer := range n.Peers {
-		if peer == n.Id {
-			continue
-		}
+	if len(n.Peers) == 1 {
+		n.CommitIndex = len(n.Log) - 1
+		n.applyLogEntry()
+	} else {
+		for _, peer := range n.Peers {
+			if peer == n.Id {
+				continue
+			}
 
-		log.Printf("Sending AppendEntries RPC to %s", peer)
-		go n.sendAppendEntries(peer)
+			log.Printf("Sending AppendEntries RPC to %s", peer)
+			go n.sendAppendEntries(peer)
+		}
 	}
+
 	log.Println("=====END OF SENDING APPEND ENTRIES=====\n")
 }
 
@@ -236,8 +242,11 @@ func (n *Node) handleAppendEntriesReply(peer string, reply AppendEntriesReply) {
 		if n.countMajority(n.CommitIndex + 1) {
 			// get the highest log index to be commited and applied from the consensus
 			for _, peer := range n.Peers {
-				if n.MatchIndex[peer] > n.CommitIndex && n.countMajority(n.CommitIndex+1) {
-					n.CommitIndex = n.MatchIndex[peer]
+				value, exists := n.MatchIndex[peer]
+				if exists {
+					if value > n.CommitIndex && n.countMajority(n.CommitIndex+1) {
+						n.CommitIndex = n.MatchIndex[peer]
+					}
 				}
 			}
 
@@ -266,35 +275,40 @@ func (n *Node) countMajority(threshold int) bool {
 	return count >= majorityThreshold
 }
 
-func (n *Node) commitChanSender() {
-	for range n.newCommitReadyChan {
-		n.mu.Lock()
-		savedTerm := n.CurrentTerm
-		savedLastApplied := n.LastApplied
-		var entries []LogEntry
-		if n.CommitIndex > n.LastApplied {
-			entries = n.Log[n.LastApplied+1 : n.CommitIndex+1]
-			n.LastApplied = n.CommitIndex
-		}
-		n.mu.Unlock()
-		n.dlog("commitChanSender entries=%v, savedLastApplied=%d", entries, savedLastApplied)
-		for i, entry := range entries {
-			n.CommitChan <- CommitEntry{
-				Command: entry.Command,
-				Index:   savedLastApplied + i + 1,
-				Term:    savedTerm,
-			}
-		}
-	}
-	n.dlog("commitChanSender done")
-}
+// func (n *Node) commitChanSender() {
+// 	for range n.newCommitReadyChan {
+// 		n.mu.Lock()
+// 		savedTerm := n.CurrentTerm
+// 		savedLastApplied := n.LastApplied
+// 		var entries []LogEntry
+// 		if n.CommitIndex > n.LastApplied {
+// 			entries = n.Log[n.LastApplied+1 : n.CommitIndex+1]
+// 			n.LastApplied = n.CommitIndex
+// 		}
+// 		n.mu.Unlock()
+// 		n.dlog("commitChanSender entries=%v, savedLastApplied=%d", entries, savedLastApplied)
+// 		for i, entry := range entries {
+// 			n.CommitChan <- CommitEntry{
+// 				Command: entry.Command,
+// 				Index:   savedLastApplied + i + 1,
+// 				Term:    savedTerm,
+// 			}
+// 		}
+// 	}
+// 	n.dlog("commitChanSender done")
+// }
 
 func (n *Node) applyLogEntry() {
 	// log.Printf("Last applied %d, commit index %d", n.LastApplied, n.CommitIndex)
-	for n.LastApplied < n.CommitIndex {
-		command := n.Log[n.LastApplied+1].Command
+	if len(n.Log) == 0 {
+		return
+	}
+
+	savedLastApplied := n.LastApplied
+	for savedLastApplied < n.CommitIndex {
+		command := n.Log[savedLastApplied+1].Command
 		log.Printf("Applying log to store with command:  %s", command)
-		switch command.Key {
+		switch command.Command {
 		case "set":
 			n.Store[command.Key] = command.Value
 		case "del":
@@ -302,6 +316,7 @@ func (n *Node) applyLogEntry() {
 		case "append":
 			n.Store[command.Key] += command.Value
 		}
-		n.LastApplied = n.LastApplied + 1
+		savedLastApplied = savedLastApplied + 1
 	}
+	n.LastApplied = savedLastApplied
 }
