@@ -1,20 +1,16 @@
 package main
 
 import (
-	"common"
-	"errors"
 	"fmt"
+	"log"
 	"net/rpc"
-	"strconv"
 )
 
-type RPCService struct {
-	Node *Node
-}
-
 type RequestVoteArgs struct {
-	Term        int
-	CandidateID Address
+	Term         int
+	CandidateId  string
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 type RequestVoteReply struct {
@@ -24,10 +20,10 @@ type RequestVoteReply struct {
 
 type AppendEntriesArgs struct {
 	Term         int
-	LeaderID     Address
+	LeaderId     string
 	PrevLogIndex int
 	PrevLogTerm  int
-	Entries      []common.LogEntry
+	Entries      []LogEntry
 	LeaderCommit int
 }
 
@@ -36,198 +32,232 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-func (r *RPCService) Ping(_ struct{}, reply *string) error {
-	fmt.Println("PING")
-	*reply = "PONG"
-	r.Node.heartbeatCh <- true
-	return nil
+type ExecuteArgs struct {
+	Command string
+	Key     string
+	Value   string
 }
 
-func (r *RPCService) Get(key string, reply *string) error {
-	fmt.Println("GET ", key)
-	*reply = r.Node.GetValue(key)
-	return nil
+type ExecuteReply struct {
+	Response string
 }
 
-func (r *RPCService) Set(args []string, reply *string) error {
-	if len(args) < 2 {
-		return errors.New("insufficient number of arguments")
-	}
-	key := args[0]
-	val := args[1]
-	command := fmt.Sprintf("SET %s %s", key, val)
-
-	r.Node.mutex.Lock()
-	logEntry := common.LogEntry{
-		Term:    r.Node.ElectionTerm,
-		Command: command,
-	}
-	r.Node.Log = append(r.Node.Log, logEntry)
-	r.Node.mutex.Unlock()
-
-	if r.Node.Type == LEADER {
-		r.Node.replicateLog()
-	}
-
-	r.Node.Application[key] = val
-	*reply = "OK"
-	return nil
+type JoinArgs struct {
+	Id string
 }
 
-func (n *Node) replicateLog() {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
-	for _, address := range n.AddressList {
-		if address != n.Address {
-			go n.sendAppendEntries(address)
-		}
-	}
+type JoinReply struct {
+	Peers []string
 }
 
-func (r *RPCService) GetLog(_ struct{}, reply *[]common.LogEntry) error {
-	r.Node.mutex.Lock()
-	defer r.Node.mutex.Unlock()
-	*reply = r.Node.Log
-	return nil
-}
+func (n *Node) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-func (n *Node) sendAppendEntries(address Address) {
-	client, err := rpc.Dial("tcp", address.IPAddress+":"+address.Port)
-	if err != nil {
-		fmt.Println("Error dialing:", err)
-		return
-	}
-	defer client.Close()
-
-	args := AppendEntriesArgs{
-		Term:         n.ElectionTerm,
-		LeaderID:     n.Address,
-		PrevLogIndex: len(n.Log) - 1,
-		PrevLogTerm:  n.Log[len(n.Log)-1].Term,
-		Entries:      []common.LogEntry{n.Log[len(n.Log)-1]},
-		LeaderCommit: n.CommitIndex,
+	if args.Term > n.CurrentTerm {
+		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", args.Term, n.CurrentTerm, args.Term)
+		n.CurrentTerm = args.Term
+		n.VotedFor = nil
+		n.State = Follower
 	}
 
-	var reply AppendEntriesReply
-	err = client.Call("RPCService.AppendEntries", args, &reply)
-	if err != nil {
-		fmt.Println("Error calling AppendEntries to", address.IPAddress+":"+address.Port, ":", err)
-		return
-	}
+	reply.Term = n.CurrentTerm
 
-	if !reply.Success && reply.Term > n.ElectionTerm {
-		n.ElectionTerm = reply.Term
-		n.Type = FOLLOWER
-	}
-}
-
-func (r *RPCService) Strln(key string, reply *string) error {
-	fmt.Println("STRLN " + key)
-	*reply = strconv.Itoa(len(r.Node.GetValue(key)))
-	return nil
-}
-
-func (r *RPCService) Del(key string, reply *string) error {
-	fmt.Println("DEL " + key)
-
-	r.Node.mutex.Lock()
-	defer r.Node.mutex.Unlock()
-	command := fmt.Sprintf("DEL %s", key)
-	logEntry := common.LogEntry{
-		Term:    r.Node.ElectionTerm,
-		Command: command,
-	}
-	r.Node.Log = append(r.Node.Log, logEntry)
-
-	*reply = r.Node.GetValue(key)
-	delete(r.Node.Application, key)
-	return nil
-}
-
-func (r *RPCService) Append(args []string, reply *string) error {
-	if len(args) < 2 {
-		return errors.New("insufficient number of arguments")
-	}
-
-	key := args[0]
-	value := args[1]
-	command := fmt.Sprintf("APPEND %s %s", key, value)
-	r.Node.mutex.Lock()
-	defer r.Node.mutex.Unlock()
-	logEntry := common.LogEntry{
-		Term:    r.Node.ElectionTerm,
-		Command: command,
-	}
-	r.Node.Log = append(r.Node.Log, logEntry)
-
-	r.Node.SetValue(args[0], r.Node.GetValue(args[0])+args[1])
-	*reply = "OK"
-	return nil
-}
-
-func (r *RPCService) AddFollower(address Address, reply *string) error {
-	r.Node.mutex.Lock()
-	defer r.Node.mutex.Unlock()
-	command := fmt.Sprintf("ADDFOLLOWER %s:%s", address.IPAddress, address.Port)
-	logEntry := common.LogEntry{
-		Term:    r.Node.ElectionTerm,
-		Command: command,
-	}
-	r.Node.Log = append(r.Node.Log, logEntry)
-
-	r.Node.AddFollower(address)
-	*reply = "Follower added: " + address.IPAddress + ":" + address.Port
-	return nil
-}
-
-func (r *RPCService) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
-	r.Node.mutex.Lock()
-	defer r.Node.mutex.Unlock()
-
-	if args.Term < r.Node.ElectionTerm {
-		reply.Term = r.Node.ElectionTerm
+	if args.Term < n.CurrentTerm || (n.VotedFor != nil && *n.VotedFor != args.CandidateId) {
 		reply.VoteGranted = false
 		return nil
 	}
 
-	if r.Node.VotedFor == nil || *r.Node.VotedFor == args.CandidateID {
-		r.Node.VotedFor = &args.CandidateID
+	lastLogIndex := len(n.Log) - 1
+	lastLogTerm := 0
+	if len(n.Log) > 0 {
+		lastLogTerm = n.Log[lastLogIndex].Term
+	}
+
+	if args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex) {
+		n.VotedFor = &args.CandidateId
 		reply.VoteGranted = true
+		log.Printf("Granting vote to candidate %s for term %d", args.CandidateId, args.Term)
+		n.resetElectionTimer()
 	} else {
 		reply.VoteGranted = false
 	}
-
-	reply.Term = r.Node.ElectionTerm
+	reply.Term = n.CurrentTerm
+	n.dlog("... RequestVote reply: %+v", reply)
 	return nil
 }
 
-func (r *RPCService) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
-	r.Node.mutex.Lock()
-	defer r.Node.mutex.Unlock()
+func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.dlog("AppendEntries: %+v", args)
+	if args.Term > n.CurrentTerm {
+		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", args.Term, n.CurrentTerm, args.Term)
+		n.CurrentTerm = args.Term
+		n.VotedFor = nil
+		n.State = Follower
+		n.resetElectionTimer()
+	}
 
-	if args.Term < r.Node.ElectionTerm {
-		reply.Term = r.Node.ElectionTerm
+	reply.Term = n.CurrentTerm
+
+	if args.Term < n.CurrentTerm {
 		reply.Success = false
 		return nil
 	}
 
-	r.Node.ElectionTerm = args.Term
-	r.Node.LeaderAddress = args.LeaderID
-
-	if len(r.Node.Log) > args.PrevLogIndex && r.Node.Log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.Term = r.Node.ElectionTerm
+	// Check if log contains an entry at PrevLogIndex with PrevLogTerm
+	if args.PrevLogIndex >= 0 && (args.PrevLogIndex >= len(n.Log) || n.Log[args.PrevLogIndex].Term != args.PrevLogTerm) {
 		reply.Success = false
 		return nil
 	}
 
-	r.Node.Log = append(r.Node.Log[:args.PrevLogIndex+1], args.Entries...)
-	if args.LeaderCommit > r.Node.CommitIndex {
-		r.Node.CommitIndex = min(args.LeaderCommit, len(r.Node.Log)-1)
+	// Append new entries
+	// for i, entry := range args.Entries {
+	// 	if len(n.Log) <= args.PrevLogIndex+1+i {
+	// 		n.Log = append(n.Log, entry)
+	// 	} else if n.Log[args.PrevLogIndex+1+i].Term != entry.Term {
+	// 		n.Log = n.Log[:args.PrevLogIndex+1+i]
+	// 		n.Log = append(n.Log, entry)
+	// 	}
+	// }
+	logInsertIndex := args.PrevLogIndex + 1
+	newEntriesIndex := 0
+
+	for {
+		if logInsertIndex >= len(n.Log) || newEntriesIndex >= len(args.Entries) {
+			break
+		}
+		if n.Log[logInsertIndex].Term != args.Entries[newEntriesIndex].Term {
+			break
+		}
+		logInsertIndex++
+		newEntriesIndex++
 	}
 
-	reply.Term = r.Node.ElectionTerm
+	if newEntriesIndex < len(args.Entries) {
+		n.dlog("... inserting entries %v from index %d", args.Entries[newEntriesIndex:], logInsertIndex)
+		n.Log = append(n.Log[:logInsertIndex], args.Entries[newEntriesIndex:]...)
+		n.dlog("... log is now: %v", n.Log)
+	}
+
+	if args.LeaderCommit > n.CommitIndex {
+		n.CommitIndex = min(args.LeaderCommit, len(n.Log)-1)
+		n.dlog("... setting commitIndex=%d", n.CommitIndex)
+		n.newCommitReadyChan <- struct{}{}
+	}
+
 	reply.Success = true
+	reply.Term = n.CurrentTerm
+	n.dlog("AppendEntries reply: %+v", *reply)
+	log.Println("AppendEntries successful, resetting election timeout")
+	n.resetElectionTimer()
+	return nil
+}
+
+func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
+	log.Printf("Received command %s", args.Command)
+	n.dlog("Submit received by %v: %v", n.State, args.Command)
+	if n.State != Leader {
+		reply.Response = "NOT LEADER"
+		return nil
+	}
+
+	switch args.Command {
+	case "ping":
+		reply.Response = "PONG"
+	case "get":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
+		if value, ok := n.Store[args.Key]; ok {
+			reply.Response = value
+		} else {
+			reply.Response = ""
+		}
+	case "set":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
+		n.Store[args.Key] = args.Value
+		reply.Response = "OK"
+	case "strln":
+		if value, ok := n.Store[args.Key]; ok {
+			reply.Response = fmt.Sprintf("%d", len(value))
+		} else {
+			reply.Response = "0"
+		}
+	case "del":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
+		if value, ok := n.Store[args.Key]; ok {
+			delete(n.Store, args.Key)
+			reply.Response = value
+		} else {
+			reply.Response = ""
+		}
+	case "append":
+		n.Log = append(n.Log, LogEntry{Command: args.Command, Term: n.CurrentTerm})
+		n.dlog("... log=%v", n.Log)
+		n.Store[args.Key] += args.Value
+		reply.Response = "OK"
+	default:
+		reply.Response = "UNKNOWN COMMAND"
+	}
+	return nil
+}
+
+func (n *Node) GetLog(args struct{}, reply *[]LogEntry) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	fmt.Println("GetLog called")
+
+	*reply = n.Log
+	return nil
+}
+
+func (n *Node) Join(args JoinArgs, reply *JoinReply) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// Add new peer to the list
+	for _, peer := range n.Peers {
+		if peer == args.Id {
+			// Peer already exists
+			reply.Peers = n.Peers
+			return nil
+		}
+	}
+
+	n.Peers = append(n.Peers, args.Id)
+	log.Printf("Peer %s joined the network", args.Id)
+
+	// Notify all existing peers about the new peer
+	for _, peer := range n.Peers {
+		if peer == args.Id || peer == n.Id {
+			continue
+		}
+
+		go func(peer string) {
+			client, err := rpc.DialHTTP("tcp", peer)
+			if err != nil {
+				log.Printf("Failed to connect to peer %s: %v", peer, err)
+				return
+			}
+			defer client.Close()
+
+			joinArgs := JoinArgs{Id: args.Id}
+			var joinReply JoinReply
+
+			log.Printf("Notifying peer %s about new peer %s", peer, args.Id)
+			err = client.Call("Node.Join", joinArgs, &joinReply)
+			if err != nil {
+				log.Printf("Join RPC call to peer %s failed: %v", peer, err)
+			}
+		}(peer)
+	}
+
+	// Return the updated list of peers to the new node
+	reply.Peers = n.Peers
 	return nil
 }
 
@@ -236,4 +266,25 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func call(peer string, rpcName string, args interface{}, reply interface{}) bool {
+	client, err := rpc.DialHTTP("tcp", peer)
+	if err != nil {
+		log.Printf("Failed to connect to peer %s: %v", peer, err)
+		return false
+	}
+	defer client.Close()
+
+	err = client.Call(rpcName, args, reply)
+	if err != nil {
+		log.Printf("RPC call %s to peer %s failed: %v", rpcName, peer, err)
+		return false
+	}
+	return true
+}
+
+func (n *Node) dlog(format string, args ...interface{}) {
+	format = fmt.Sprintf("[%s] ", n.Id) + format
+	log.Printf(format, args...)
 }
