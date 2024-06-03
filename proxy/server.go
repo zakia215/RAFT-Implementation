@@ -50,7 +50,7 @@ func (s *Server) ConnectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.client = client
-	fmt.Fprintln(w, "Connected successfully")
+	json.NewEncoder(w).Encode(map[string]string{"reply": "Connected Successfully"})
 }
 
 func (s *Server) PingHandler(w http.ResponseWriter, r *http.Request) {
@@ -232,5 +232,4 @@ func (s *Server) LogHandler(w http.ResponseWriter, r *http.Request) {
 
 	response := map[string]interface{}{"reply": *logEntries}
 	json.NewEncoder(w).Encode(response)
-
 }
