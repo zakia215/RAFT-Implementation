@@ -124,7 +124,11 @@ export async function append(key: string, value: string): Promise<string> {
 
 export type LogType = {
   term: number;
-  command: string;
+  command: {
+    command: string,
+    key: string,
+    value: string
+  };
 };
 
 export async function log(): Promise<LogType[]> {

@@ -19,7 +19,7 @@ export function Log({ connected }: LogProps) {
             newLog.map((log, index) => (
               <div
                 key={index}
-              >{`Term: ${log.term}, Command: ${log.command}`}</div>
+              >{`Term: ${log.term}, Command: ${log.command.command} ${log.command.key} ${log.command.value}`}</div>
             ))
           );
         } catch (error) {
