@@ -33,10 +33,6 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-type ExecuteArgs = common.ExecuteArgs
-
-type ExecuteReply = common.ExecuteReply
-
 type JoinArgs struct {
 	Id string
 }
@@ -153,7 +149,7 @@ func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) 
 	return nil
 }
 
-func (n *Node) Execute(args ExecuteArgs, reply *ExecuteReply) error {
+func (n *Node) Execute(args common.ExecuteArgs, reply *common.ExecuteReply) error {
 	log.Printf("Received command %s", args.Command)
 	n.dlog("Submit received by %v: %v", n.State, args.Command)
 	if n.State != Leader {
