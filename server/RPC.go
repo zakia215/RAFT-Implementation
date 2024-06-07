@@ -1,6 +1,7 @@
 package main
 
 import (
+	"common"
 	"fmt"
 	"log"
 	"net/rpc"
@@ -32,15 +33,9 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-type ExecuteArgs struct {
-	Command string
-	Key     string
-	Value   string
-}
+type ExecuteArgs = common.ExecuteArgs
 
-type ExecuteReply struct {
-	Response string
-}
+type ExecuteReply = common.ExecuteReply
 
 type JoinArgs struct {
 	Id string

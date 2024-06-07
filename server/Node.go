@@ -1,17 +1,14 @@
 package main
 
 import (
+	"common"
 	"log"
 	"math/rand"
 	"sync"
 	"time"
 )
 
-type LogEntry struct {
-	Term    int
-	Command ExecuteArgs
-}
-
+type LogEntry = common.LogEntry
 type CommitEntry struct {
 	Term    int
 	Index   int
