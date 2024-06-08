@@ -211,6 +211,7 @@ func (n *Node) handleRequestVoteReply(reply RequestVoteReply) {
 func (n *Node) initializeLeaderState() {
 	n.NextIndex = make(map[string]int)
 	n.MatchIndex = make(map[string]int)
+	n.LeaderId = n.Id
 	for _, peer := range n.Peers {
 		n.NextIndex[peer] = len(n.Log)
 		n.MatchIndex[peer] = 0
