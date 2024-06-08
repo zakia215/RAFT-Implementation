@@ -41,6 +41,8 @@ type Node struct {
 	Store              map[string]string
 	CommitChan         chan<- CommitEntry
 	newCommitReadyChan chan struct{}
+	LeaderAdd          string
+	LeaderPort         string
 }
 
 func (n *Node) Initialize() {

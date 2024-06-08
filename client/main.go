@@ -18,7 +18,9 @@ type ExecuteArgs struct {
 }
 
 type ExecuteReply struct {
-	Response string
+	Response   string
+	LeaderAdd  string
+	LeaderPort string
 }
 
 type LogEntry struct {
@@ -120,6 +122,42 @@ repl:
 		err = client.Call("Node.Execute", args, &reply)
 		if err != nil {
 			log.Fatal("Call error:", err)
+		}
+
+		// if strings.HasPrefix(reply.Response, "NOT LEADER") {
+		// 	parts := strings.Split(reply.Response, " ")
+		// 	if len(parts) != 3 {
+		// 		log.Fatal(parts)
+		// 		log.Fatal("Invalid response format")
+		// 	}
+		// 	leaderAdd := parts[1]
+		// 	leaderPort := parts[2]
+
+		// 	client.Close()
+		// 	client, err = rpc.DialHTTP("tcp", leaderAdd+":"+leaderPort)
+		// 	if err != nil {
+		// 		log.Fatal("Redirect error:", err)
+		// 	}
+		// 	fmt.Println("Redirected to leader at", leaderAdd+":"+leaderPort)
+
+		// 	err = client.Call("Node.Execute", args, &reply)
+		// 	if err != nil {
+		// 		log.Fatal("Retry call error:", err)
+		// 	}
+		// }
+
+		if reply.Response == "NOT LEADER" {
+			client.Close()
+			client, err = rpc.DialHTTP("tcp", reply.LeaderAdd+":"+reply.LeaderPort)
+			if err != nil {
+				log.Fatal("Redirect error:", err)
+			}
+			fmt.Println("Redirected to leader at", reply.LeaderAdd+":"+reply.LeaderPort)
+
+			err = client.Call("Node.Execute", args, &reply)
+			if err != nil {
+				log.Fatal("Retry call error:", err)
+			}
 		}
 
 		fmt.Println(reply.Response)

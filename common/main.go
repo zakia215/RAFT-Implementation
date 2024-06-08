@@ -12,5 +12,7 @@ type ExecuteArgs struct {
 }
 
 type ExecuteReply struct {
-	Response string
+	Response   string
+	LeaderAdd  string
+	LeaderPort string
 }

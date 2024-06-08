@@ -32,9 +32,11 @@ func main() {
 
 	// Create and initialize the node
 	node := Node{
-		Id:    nodeID,
-		Peers: []string{},
-		Store: make(map[string]string),
+		Id:         nodeID,
+		Peers:      []string{},
+		Store:      make(map[string]string),
+		LeaderAdd:  leaderIP,
+		LeaderPort: leaderPort,
 	}
 	node.Initialize()
 

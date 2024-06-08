@@ -144,7 +144,7 @@ func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) 
 	n.dlog("AppendEntries reply: %+v", *reply)
 	log.Println("AppendEntries successful, resetting election timeout")
 	log.Println("Address peer in cluster: ", n.Peers)
-	log.Println("======END OF APPEND ENTRIES=====\n")
+	log.Println("======END OF APPEND ENTRIES=====")
 	n.resetElectionTimer()
 	return nil
 }
@@ -154,6 +154,8 @@ func (n *Node) Execute(args common.ExecuteArgs, reply *common.ExecuteReply) erro
 	n.dlog("Submit received by %v: %v", n.State, args.Command)
 	if n.State != Leader {
 		reply.Response = "NOT LEADER"
+		reply.LeaderAdd = n.LeaderAdd
+		reply.LeaderPort = n.LeaderPort
 		return nil
 	}
 
