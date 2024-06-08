@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { connect, ping, get, set, strln, append } from "../lib/lib";
+import { connect, ping, get, set, strln, append, del } from "../lib/lib";
 
 type ToolBarProps = {
   connected: boolean;
@@ -14,7 +14,7 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
   const [value, setValue] = useState("");
   const [reply, setReply] = useState("");
 
-  const commandOptions = ["ping", "get", "set", "strln", "append"];
+  const commandOptions = ["ping", "get", "set", "strln", "append", "del"];
 
   const handleConnect = () => {
     connect(ip, port).then((success) => {
@@ -39,6 +39,9 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
         break;
       case "append":
         commandReply = await append(key, value);
+        break;
+      case "del":
+        commandReply = await del(key);
         break;
       default:
         console.error("Invalid command");
