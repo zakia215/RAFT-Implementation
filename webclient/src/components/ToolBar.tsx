@@ -103,26 +103,30 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
               ))}
             </select>
           </div>
-          <div>
-            <label style={labelStyle}>Key:</label>
-            <input
-              type="text"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="Enter key"
-              style={inputStyle}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Value:</label>
-            <input
-              type="text"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="Enter value"
-              style={inputStyle}
-            />
-          </div>
+          {selectedCommand && selectedCommand !== "ping" && (
+            <div>
+              <label style={labelStyle}>Key:</label>
+              <input
+                type="text"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                placeholder="Enter key"
+                style={inputStyle}
+              />
+            </div>
+          )}
+          {(selectedCommand === "set" || selectedCommand === "append") && (
+            <div>
+              <label style={labelStyle}>Value:</label>
+              <input
+                type="text"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="Enter value"
+                style={inputStyle}
+              />
+            </div>
+          )}
           <button onClick={handleExecute} disabled={!connected}>
             Execute
           </button>
