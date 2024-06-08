@@ -193,25 +193,32 @@ func (n *Node) Execute(args common.ExecuteArgs, reply *common.ExecuteReply) erro
 
 	case "strln":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
-		// idxToExec := len(n.Log) - 1
+		idxToExec := len(n.Log) - 1
 		n.dlog("... log=%v", n.Log)
+		isExec := false
 
-		if value, ok := n.Store[args.Key]; ok {
-			reply.Response = fmt.Sprintf("%d", len(value))
-		} else {
-			reply.Response = "0"
+		for !isExec {
+			if n.LastApplied >= idxToExec {
+				if value, ok := n.Store[args.Key]; ok {
+					reply.Response = fmt.Sprintf("%d", len(value))
+				} else {
+					reply.Response = "0"
+				}
+				isExec = true
+			}
 		}
 	case "del":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
-		// idxToExec := len(n.Log) - 1
-		n.dlog("... log=%v", n.Log)
+        idxToExec := len(n.Log) - 1
+        n.dlog("... log=%v", n.Log)
+        isExec := false
 
-		if value, ok := n.Store[args.Key]; ok {
-			delete(n.Store, args.Key)
-			reply.Response = value
-		} else {
-			reply.Response = ""
-		}
+        for !isExec {
+            if n.LastApplied >= idxToExec {
+                reply.Response = "OK"
+                isExec = true
+            }
+        }
 	case "append":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
         idxToExec := len(n.Log) - 1
