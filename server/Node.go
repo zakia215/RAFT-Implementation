@@ -41,8 +41,7 @@ type Node struct {
 	Store              map[string]string
 	CommitChan         chan<- CommitEntry
 	newCommitReadyChan chan struct{}
-	LeaderAdd          string
-	LeaderPort         string
+	LeaderId           string
 }
 
 func (n *Node) Initialize() {
@@ -102,7 +101,8 @@ func (n *Node) sendRequestVoteRPCs() {
 }
 
 func (n *Node) SendAppendEntriesRPCs() {
-	if len(n.Peers) == 1 {
+	// always execute if there's no peer
+	if len(n.Peers) <= 1 {
 		n.CommitIndex = len(n.Log) - 1
 		n.applyLogEntry()
 	} else {
@@ -156,6 +156,7 @@ func (n *Node) sendAppendEntries(peer string) {
 
 	prevLogIndex := n.NextIndex[peer] - 1
 	prevLogTerm := 0
+	// println(peer, n.NextIndex[peer])
 	if prevLogIndex >= 0 && prevLogIndex < len(n.Log) {
 		prevLogTerm = n.Log[prevLogIndex].Term
 	}
@@ -217,11 +218,13 @@ func (n *Node) initializeLeaderState() {
 }
 
 func (n *Node) handleAppendEntriesReply(peer string, reply AppendEntriesReply) {
+	log.Println(reply)
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if reply.Term > n.CurrentTerm {
 		log.Printf("Received higher term %d, updating current term from %d to %d and converting to follower", reply.Term, n.CurrentTerm, reply.Term)
 		n.CurrentTerm = reply.Term
+		n.LeaderId = peer
 		n.VotedFor = nil
 		n.State = Follower
 		n.resetElectionTimer()
@@ -258,7 +261,8 @@ func (n *Node) handleAppendEntriesReply(peer string, reply AppendEntriesReply) {
 		// 	n.newCommitReadyChan <- struct{}{}
 		// }
 	} else {
-		n.NextIndex[peer]--
+		n.NextIndex[peer] = max(n.NextIndex[peer]-1, 0)
+		n.MatchIndex[peer] = n.NextIndex[peer] - 1
 		log.Printf("AppendEntries not successful for %s", peer)
 	}
 }
@@ -314,6 +318,11 @@ func (n *Node) applyLogEntry() {
 			delete(n.Store, command.Key)
 		case "append":
 			n.Store[command.Key] += command.Value
+		case "join":
+			// add peer to the cluster
+			n.Peers = append(n.Peers, command.Value)
+			log.Printf("Peer %s joined the cluster", command.Value)
+			log.Printf("Current cluster: %s", n.Peers)
 		}
 		savedLastApplied = savedLastApplied + 1
 	}

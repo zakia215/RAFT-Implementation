@@ -87,6 +87,7 @@ func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) 
 		n.CurrentTerm = args.Term
 		n.VotedFor = nil
 		n.State = Follower
+		n.LeaderId = args.LeaderId
 		n.resetElectionTimer()
 	}
 
@@ -154,8 +155,7 @@ func (n *Node) Execute(args common.ExecuteArgs, reply *common.ExecuteReply) erro
 	n.dlog("Submit received by %v: %v", n.State, args.Command)
 	if n.State != Leader {
 		reply.Response = "NOT LEADER"
-		reply.LeaderAdd = n.LeaderAdd
-		reply.LeaderPort = n.LeaderPort
+		reply.LeaderId = n.LeaderId
 		return nil
 	}
 
@@ -209,28 +209,28 @@ func (n *Node) Execute(args common.ExecuteArgs, reply *common.ExecuteReply) erro
 		}
 	case "del":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
-        idxToExec := len(n.Log) - 1
-        n.dlog("... log=%v", n.Log)
-        isExec := false
+		idxToExec := len(n.Log) - 1
+		n.dlog("... log=%v", n.Log)
+		isExec := false
 
-        for !isExec {
-            if n.LastApplied >= idxToExec {
-                reply.Response = "OK"
-                isExec = true
-            }
-        }
+		for !isExec {
+			if n.LastApplied >= idxToExec {
+				reply.Response = "OK"
+				isExec = true
+			}
+		}
 	case "append":
 		n.Log = append(n.Log, LogEntry{Command: args, Term: n.CurrentTerm})
-        idxToExec := len(n.Log) - 1
-        n.dlog("... log=%v", n.Log)
-        isExec := false
+		idxToExec := len(n.Log) - 1
+		n.dlog("... log=%v", n.Log)
+		isExec := false
 
-        for !isExec {
-            if n.LastApplied >= idxToExec {
-                reply.Response = "OK"
-                isExec = true
-            }
-        }
+		for !isExec {
+			if n.LastApplied >= idxToExec {
+				reply.Response = "OK"
+				isExec = true
+			}
+		}
 	default:
 		reply.Response = "UNKNOWN COMMAND"
 	}
@@ -252,50 +252,30 @@ func (n *Node) Join(args JoinArgs, reply *JoinReply) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Add new peer to the list
 	for _, peer := range n.Peers {
 		if peer == args.Id {
 			// Peer already exists
-			reply.Peers = n.Peers
 			return nil
 		}
 	}
 
-	n.Peers = append(n.Peers, args.Id)
-	log.Printf("Peer %s joined the network", args.Id)
-
-	// Notify all existing peers about the new peer
-	for _, peer := range n.Peers {
-		if peer == args.Id || peer == n.Id {
-			continue
-		}
-
-		go func(peer string) {
-			client, err := rpc.DialHTTP("tcp", peer)
-			if err != nil {
-				log.Printf("Failed to connect to peer %s: %v", peer, err)
-				return
-			}
-			defer client.Close()
-
-			joinArgs := JoinArgs{Id: args.Id}
-			var joinReply JoinReply
-
-			log.Printf("Notifying peer %s about new peer %s", peer, args.Id)
-			err = client.Call("Node.Join", joinArgs, &joinReply)
-			if err != nil {
-				log.Printf("Join RPC call to peer %s failed: %v", peer, err)
-			}
-		}(peer)
+	logArgs := common.ExecuteArgs{
+		Command: "join",
+		Value:   args.Id,
 	}
-
-	// Return the updated list of peers to the new node
-	reply.Peers = n.Peers
+	n.Log = append(n.Log, LogEntry{Command: logArgs, Term: n.CurrentTerm})
 	return nil
 }
 
 func min(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b

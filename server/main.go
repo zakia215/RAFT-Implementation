@@ -1,6 +1,7 @@
 package main
 
 import (
+	"common"
 	"fmt"
 	"log"
 	"net"
@@ -29,14 +30,14 @@ func main() {
 
 	address := ip + ":" + port
 	nodeID := ip + ":" + port // Use the combination of IP and port as ID
+	leaderId := leaderIP + ":" + leaderPort
 
 	// Create and initialize the node
 	node := Node{
-		Id:         nodeID,
-		Peers:      []string{},
-		Store:      make(map[string]string),
-		LeaderAdd:  leaderIP,
-		LeaderPort: leaderPort,
+		Id:       nodeID,
+		Peers:    []string{},
+		Store:    make(map[string]string),
+		LeaderId: leaderId,
 	}
 	node.Initialize()
 
@@ -60,8 +61,16 @@ func main() {
 	if isLeader {
 		log.Println("This node is the leader")
 		node.State = Leader
-		node.Peers = append(node.Peers, nodeID) // Leader adds itself to its peer list
+
+		// node.Peers = append(node.Peers, nodeID)
 		node.StartHeartbeat()
+
+		logArgs := common.ExecuteArgs{
+			Command: "join",
+			Value:   nodeID,
+		}
+		node.Log = append(node.Log, LogEntry{Command: logArgs, Term: node.CurrentTerm}) // Leader adds itself to the log
+
 	} else {
 		log.Println("This node is a follower")
 
@@ -79,12 +88,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("JoinRPC failed: %v", err)
 		}
-
-		// Get the updated list of peers
-		node.mu.Lock()
-		node.Peers = reply.Peers
-		node.mu.Unlock()
-		log.Printf("Updated peer list: %v", node.Peers)
 	}
 
 	// Start serving RPC requests

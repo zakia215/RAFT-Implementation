@@ -18,9 +18,8 @@ type ExecuteArgs struct {
 }
 
 type ExecuteReply struct {
-	Response   string
-	LeaderAdd  string
-	LeaderPort string
+	Response string
+	LeaderId string
 }
 
 type LogEntry struct {
@@ -148,11 +147,11 @@ repl:
 
 		if reply.Response == "NOT LEADER" {
 			client.Close()
-			client, err = rpc.DialHTTP("tcp", reply.LeaderAdd+":"+reply.LeaderPort)
+			client, err = rpc.DialHTTP("tcp", reply.LeaderId)
 			if err != nil {
 				log.Fatal("Redirect error:", err)
 			}
-			fmt.Println("Redirected to leader at", reply.LeaderAdd+":"+reply.LeaderPort)
+			fmt.Println("Redirected to leader at", reply.LeaderId)
 
 			err = client.Call("Node.Execute", args, &reply)
 			if err != nil {
