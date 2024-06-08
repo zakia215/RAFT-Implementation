@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { log } from "../lib/lib";
 
 type LogProps = {
@@ -7,6 +7,13 @@ type LogProps = {
 
 export function Log({ connected }: LogProps) {
   const [currentLog, setCurrentLog] = useState<React.ReactNode[]>([]);
+  const logDivRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (logDivRef.current) {
+      logDivRef.current.scrollTop = logDivRef.current.scrollHeight;
+    }
+  }, [currentLog]);
 
   useEffect(() => {
     let interval: number;
@@ -17,9 +24,15 @@ export function Log({ connected }: LogProps) {
           const newLog = await log();
           setCurrentLog(
             newLog.map((log, index) => (
-              <div
-                key={index}
-              >{`Term: ${log.term}, Command: ${log.command.command} ${log.command.key} ${log.command.value}`}</div>
+              <div key={index} style={{ fontFamily: "monospace" }}>
+                <span>{`$ `}</span>
+                <span style={{ color: "lime" }}>{`Term: `}</span>
+                <span>{`${log.term}`}</span>
+                <span>{` | `}</span>
+                <span style={{ color: "lime" }}>{`Command: `}</span>
+                <span>{`${log.command.command} ${log.command.key} ${log.command.value}`}</span>
+              </div>
+            
             ))
           );
         } catch (error) {
@@ -37,7 +50,7 @@ export function Log({ connected }: LogProps) {
   return (
     <div>
       <div style={{ fontWeight: "bold", marginBottom: "10px" }}>Log</div>
-      <div
+      <div ref={logDivRef}
         style={{
           backgroundColor: "black",
           width: "50vw",
