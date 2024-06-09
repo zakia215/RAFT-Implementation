@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { connect, ping, get, set, strln, append, del } from "../lib/lib";
+import { toast } from "react-toastify";
 
 type ToolBarProps = {
   connected: boolean;
@@ -16,53 +17,78 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
 
   const commandOptions = ["ping", "get", "set", "strln", "append", "del"];
 
-  const handleConnect = () => {
-    connect(ip, port).then((success) => {
+  const handleConnect = async () => {
+    try {
+      toast.loading("Connecting to server");
+      const success = await connect(ip, port);
       setConnected(success);
-    });
+      toast.dismiss();
+      toast.success("Connected to server");
+    } catch (error) {
+      toast.dismiss();
+      toast.error("Failed to connect to server");
+    }
   };
 
   const handleExecute = async () => {
     let commandReply = "";
-    switch (selectedCommand) {
-      case "ping":
-        commandReply = await ping();
-        break;
-      case "get":
-        commandReply = await get(key);
-        break;
-      case "set":
-        commandReply = await set(key, value);
-        break;
-      case "strln":
-        commandReply = await strln(key);
-        break;
-      case "append":
-        commandReply = await append(key, value);
-        break;
-      case "del":
-        commandReply = await del(key);
-        break;
-      default:
-        console.error("Invalid command");
+    try {
+      switch (selectedCommand) {
+        case "ping":
+          commandReply = await ping();
+          break;
+        case "get":
+          commandReply = await get(key);
+          break;
+        case "set":
+          commandReply = await set(key, value);
+          break;
+        case "strln":
+          commandReply = await strln(key);
+          break;
+        case "append":
+          commandReply = await append(key, value);
+          break;
+        case "del":
+          commandReply = await del(key);
+          break;
+        default:
+          toast.error("Invalid command");
+      }
+    } catch (error) {
+      toast.error("Failed to execute command");
     }
     setReply(commandReply);
   };
 
   const labelStyle = {
     display: "block",
+    fontSize: "0.9em",
+    marginBottom: "8px",
   };
 
   const inputStyle: React.CSSProperties = {
-    padding: "5px",
-    fontSize: "1em",
-    margin: "10px 0 10px 0",
+    paddingLeft: "8px",
+    paddingRight: "8px",
+    paddingTop: "6px",
+    paddingBottom: "6px",
+    fontSize: "0.9em",
+    fontFamily: "inherit",
+    borderRadius: "6px",
+    backgroundColor: "#444444",
+    border: "none",
   };
 
   return (
     <div style={{ paddingLeft: "40px" }}>
-      <div>
-        <label style={labelStyle}>IP Address:</label>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          marginBottom: "12px",
+        }}
+      >
+        <label style={labelStyle}>IP Address</label>
         <input
           type="text"
           value={ip}
@@ -71,8 +97,14 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
           style={inputStyle}
         />
       </div>
-      <div>
-        <label style={labelStyle}>Port:</label>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          marginBottom: "16px",
+        }}
+      >
+        <label style={labelStyle}>Port</label>
         <input
           type="text"
           value={port}
@@ -87,18 +119,36 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
       <div
         style={{
           display: "flex",
-          gap: "40px",
+          gap: "20px",
+          marginTop: "20px",
         }}
       >
-        <div>
-          <div>
-            <label style={labelStyle}>Select a command:</label>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <label style={labelStyle}>Command</label>
             <select
               value={selectedCommand}
               onChange={(e) => setSelectedCommand(e.target.value)}
-              style={inputStyle}
+              style={{
+                padding: "4px",
+                fontSize: "0.9em",
+                fontFamily: "inherit",
+                borderRadius: "6px",
+                backgroundColor: "#444444",
+              }}
             >
-              <option value="">Choose a command</option>
+              <option value="">Select a command</option>
               {commandOptions.map((choice, index) => (
                 <option key={index} value={choice}>
                   {choice}
@@ -107,46 +157,110 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
             </select>
           </div>
           {selectedCommand && selectedCommand !== "ping" && (
-            <div>
-              <label style={labelStyle}>Key:</label>
+            <div
+              style={{
+                display: "flex",
+                gap: "24px",
+                alignItems: "center",
+              }}
+            >
+              <label style={{
+                display: "block",
+                fontSize: "0.9em",
+                marginBottom: "2px",
+              }}>Key</label>
               <input
                 type="text"
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 placeholder="Enter key"
-                style={inputStyle}
+                style={{
+                  paddingLeft: "8px",
+                  paddingRight: "8px",
+                  paddingTop: "6px",
+                  paddingBottom: "6px",
+                  fontSize: "0.9em",
+                  fontFamily: "inherit",
+                  borderRadius: "6px",
+                  backgroundColor: "#444444",
+                  border: "none",
+                  width: "7rem",
+                }}
               />
             </div>
           )}
           {(selectedCommand === "set" || selectedCommand === "append") && (
-            <div>
-              <label style={labelStyle}>Value:</label>
+            <div
+              style={{
+                display: "flex",
+                gap: "12px",
+                alignItems: "center",
+              }}
+            >
+              <label style={{
+                display: "block",
+                fontSize: "0.9em",
+                marginBottom: "2px",
+              }}>Value</label>
               <input
                 type="text"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder="Enter value"
-                style={inputStyle}
+                style={{
+                  paddingLeft: "8px",
+                  paddingRight: "8px",
+                  paddingTop: "6px",
+                  paddingBottom: "6px",
+                  fontSize: "0.9em",
+                  fontFamily: "inherit",
+                  borderRadius: "6px",
+                  backgroundColor: "#444444",
+                  border: "none",
+                  width: "7rem",
+                }}
               />
             </div>
           )}
-          <button onClick={handleExecute} disabled={!connected}>
+          <button 
+            onClick={handleExecute} 
+            disabled={!connected}
+            title={!connected ? "Connect to server first" : ""}
+            style={{
+              marginTop: "8px",
+            }}
+          >
             Execute
           </button>
         </div>
-        <div>
-          <div style={{ fontWeight: "bold", marginBottom: "10px" }}>Reply</div>
-          <div
-            style={{
-              backgroundColor: "#444444",
-              width: "14rem",
-              height: "14rem",
-              padding: "10px",
-            }}
-          >
-            {reply}
+        {connected ? (
+          <div>
+            <div style={{ 
+              fontSize: "0.9em", 
+              marginBottom: "8px" }}>Server Reply</div>
+            <div
+              style={{
+                backgroundColor: "#2e2e2e",
+                width: "16rem",
+                height: "16rem",
+                padding: "8px",
+                borderRadius: "6px",
+                fontFamily: "monospace",
+              }}
+            >
+              <span className="flicker">$</span> {reply}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div 
+            style={{
+              width: "16rem",
+              height: "16rem",
+              padding: "8px",
+              borderRadius: "6px",
+            }}
+          />
+        )}
       </div>
     </div>
   );

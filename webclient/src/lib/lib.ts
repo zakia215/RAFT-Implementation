@@ -6,13 +6,14 @@ export async function connect(ip: string, port: string): Promise<boolean> {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      ip,
-      port,
-    }),
+    body: JSON.stringify({ ip, port }),
   });
 
-  return res.ok;
+  if (!res.ok) {
+    throw new Error("Connection failed");
+  }
+
+  return true;
 }
 
 export async function ping(): Promise<string> {

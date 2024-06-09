@@ -8,7 +8,7 @@ function App() {
     <div
       style={{
         display: "flex",
-        gap: "50px",
+        gap: "28px",
       }}
     >
       <ToolBar connected={connected} setConnected={setConnected} />

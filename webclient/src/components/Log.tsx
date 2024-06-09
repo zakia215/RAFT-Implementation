@@ -49,14 +49,15 @@ export function Log({ connected }: LogProps) {
   }, [connected]);
   return (
     <div>
-      <div style={{ fontWeight: "bold", marginBottom: "10px" }}>Log</div>
+      <div style={{ marginBottom: "6px" }}>Logs</div>
       <div ref={logDivRef}
         style={{
-          backgroundColor: "black",
+          backgroundColor: "#2e2e2e",
           width: "50vw",
           height: "80vh",
-          padding: "10px",
+          padding: "12px",
           overflow: "auto",
+          borderRadius: "6px",
         }}
       >
         {currentLog}
