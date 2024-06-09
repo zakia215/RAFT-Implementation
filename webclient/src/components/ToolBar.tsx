@@ -40,6 +40,9 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
           break;
         case "get":
           commandReply = await get(key);
+          if (commandReply === "") {
+            commandReply = "Key not found!";
+          }
           break;
         case "set":
           commandReply = await set(key, value);
@@ -49,9 +52,15 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
           break;
         case "append":
           commandReply = await append(key, value);
+          if (commandReply === "") {
+            commandReply = "Key not found!";
+          }
           break;
         case "del":
           commandReply = await del(key);
+          if (commandReply === "") {
+            commandReply = "Key not found!";
+          }
           break;
         default:
           toast.dismiss();
