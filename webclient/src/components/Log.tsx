@@ -8,9 +8,25 @@ type LogProps = {
 export function Log({ connected }: LogProps) {
   const [currentLog, setCurrentLog] = useState<React.ReactNode[]>([]);
   const logDivRef = useRef<HTMLDivElement | null>(null);
+  const isUserAtBottomRef = useRef(true);
 
   useEffect(() => {
-    if (logDivRef.current) {
+    const handleScroll = () => {
+      if (!logDivRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = logDivRef.current;
+      isUserAtBottomRef.current = scrollTop + clientHeight >= scrollHeight - 10;
+    };
+
+    const logDiv = logDivRef.current;
+    logDiv?.addEventListener("scroll", handleScroll);
+    
+    return () => {
+      logDiv?.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isUserAtBottomRef.current && logDivRef.current) {
       logDivRef.current.scrollTop = logDivRef.current.scrollHeight;
     }
   }, [currentLog]);
@@ -32,7 +48,6 @@ export function Log({ connected }: LogProps) {
                 <span style={{ color: "lime" }}>{`Command: `}</span>
                 <span>{`${log.command.command} ${log.command.key} ${log.command.value}`}</span>
               </div>
-            
             ))
           );
         } catch (error) {
@@ -47,10 +62,12 @@ export function Log({ connected }: LogProps) {
       }
     };
   }, [connected]);
+
   return (
     <div>
-      <div style={{ marginBottom: "6px" }}>Logs</div>
-      <div ref={logDivRef}
+      <div style={{ marginBottom: "6px", fontSize: "0.9em" }}>Logs</div>
+      <div
+        ref={logDivRef}
         style={{
           backgroundColor: "#2e2e2e",
           width: "50vw",
