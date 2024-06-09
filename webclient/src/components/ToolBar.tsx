@@ -10,7 +10,7 @@ type ToolBarProps = {
 export function ToolBar({ connected, setConnected }: ToolBarProps) {
   const [ip, setIp] = useState("");
   const [port, setPort] = useState("");
-  const [selectedCommand, setSelectedCommand] = useState("");
+  const [selectedCommand, setSelectedCommand] = useState("Select command");
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
   const [reply, setReply] = useState("");
@@ -23,7 +23,7 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
       const success = await connect(ip, port);
       setConnected(success);
       toast.dismiss();
-      toast.success("Connected to server");
+      toast.success(`Connected to ${ip}:${port}`, { autoClose: 1000 });
     } catch (error) {
       toast.dismiss();
       toast.error("Failed to connect to server");
@@ -32,6 +32,7 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
 
   const handleExecute = async () => {
     let commandReply = "";
+    toast.loading("Executing command...");
     try {
       switch (selectedCommand) {
         case "ping":
@@ -39,6 +40,9 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
           break;
         case "get":
           commandReply = await get(key);
+          if (commandReply === "") {
+            commandReply = "Key not found!";
+          }
           break;
         case "set":
           commandReply = await set(key, value);
@@ -48,14 +52,24 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
           break;
         case "append":
           commandReply = await append(key, value);
+          if (commandReply === "") {
+            commandReply = "Key not found!";
+          }
           break;
         case "del":
           commandReply = await del(key);
+          if (commandReply === "") {
+            commandReply = "Key not found!";
+          }
           break;
         default:
+          toast.dismiss();
           toast.error("Invalid command");
       }
+      toast.dismiss();
+      toast.success("Command executed successfully", { autoClose: 1000 }  );
     } catch (error) {
+      toast.dismiss();
       toast.error("Failed to execute command");
     }
     setReply(commandReply);
@@ -148,7 +162,6 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
                 backgroundColor: "#444444",
               }}
             >
-              <option value="">Select a command</option>
               {commandOptions.map((choice, index) => (
                 <option key={index} value={choice}>
                   {choice}
@@ -237,7 +250,7 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
           <div>
             <div style={{ 
               fontSize: "0.9em", 
-              marginBottom: "8px" }}>Server Reply</div>
+              marginBottom: "8px" }}>Server Response</div>
             <div
               style={{
                 backgroundColor: "#2e2e2e",
