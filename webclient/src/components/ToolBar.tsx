@@ -10,7 +10,7 @@ type ToolBarProps = {
 export function ToolBar({ connected, setConnected }: ToolBarProps) {
   const [ip, setIp] = useState("");
   const [port, setPort] = useState("");
-  const [selectedCommand, setSelectedCommand] = useState("");
+  const [selectedCommand, setSelectedCommand] = useState("Select command");
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
   const [reply, setReply] = useState("");
@@ -153,7 +153,6 @@ export function ToolBar({ connected, setConnected }: ToolBarProps) {
                 backgroundColor: "#444444",
               }}
             >
-              <option value="">Select a command</option>
               {commandOptions.map((choice, index) => (
                 <option key={index} value={choice}>
                   {choice}
