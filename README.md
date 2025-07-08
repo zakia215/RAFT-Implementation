@@ -1,13 +1,5 @@
 ## Implementasi Protokol Konsensus: Raft
 
-Oleh kelompok sistol (Kelompok 11 K02)
-
--   13521121 Saddam Annais Shaquille
--   13521142 Enrique Alifio Ditya
--   13521146 Muhammad Zaki Amanullah
--   13521166 Mohammad Rifqi Farhansyah
--   13521170 Haziq Abiyyu Mahdy
-
 ## Cara Menjalankan Program
 
 ### Cara Menjalankan Node
