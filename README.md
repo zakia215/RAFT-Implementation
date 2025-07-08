@@ -1,5 +1,3 @@
-# Tubes IF3230 Sistem Paralel dan Terdistribusi
-
 ## Implementasi Protokol Konsensus: Raft
 
 Oleh kelompok sistol (Kelompok 11 K02)
